@@ -1,0 +1,10 @@
+#!/bin/sh
+# MailRunner CLI wrapper (installed as /usr/local/sbin/mailrunner). Run as root.
+# Runs spark as user mailrunner; only commands that need root run as root.
+set -e
+[ "$(id -u)" -eq 0 ] || { echo "run as root (sudo mailrunner ...)" >&2; exit 2; }
+MR_ACTOR="${SUDO_USER:-root}"; export MR_ACTOR
+case "$1" in
+    mr:apply|mr:node:init) exec php /opt/mailrunner/current/spark "$@" ;;
+    *) exec runuser -u mailrunner -- php /opt/mailrunner/current/spark "$@" ;;
+esac

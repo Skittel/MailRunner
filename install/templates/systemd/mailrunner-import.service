@@ -1,0 +1,14 @@
+[Unit]
+Description=MailRunner: import analysed spool entries (spark mr:import)
+After=mariadb.service
+
+[Service]
+Type=oneshot
+User=mailrunner
+Group=mailrunner
+ExecStart=/usr/bin/php /opt/mailrunner/current/spark mr:import
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/mailrunner

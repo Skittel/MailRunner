@@ -1,0 +1,9 @@
+[Unit]
+Description=MailRunner: activate configuration after changes
+
+[Path]
+PathExists=/var/lib/mailrunner/apply.request
+Unit=mailrunner-apply.service
+
+[Install]
+WantedBy=multi-user.target

@@ -35,6 +35,23 @@ class Mailrunner extends BaseConfig
         $this->sendEnabled    = $this->envBool('MAILRUNNER_SEND_ENABLED', $this->sendEnabled);
         $this->receiveEnabled = $this->envBool('MAILRUNNER_RECEIVE_ENABLED', $this->receiveEnabled);
         $this->nodeId         = (string) (env('MAILRUNNER_NODE_ID') ?? $this->nodeId);
+        $this->configDir      = rtrim((string) (env('MAILRUNNER_CONFIG_DIR') ?? $this->configDir), '/');
+        $this->dataDir        = rtrim((string) (env('MAILRUNNER_DATA_DIR') ?? $this->dataDir), '/');
+    }
+
+    public function nodeKeyFile(): string
+    {
+        return $this->configDir . '/node.key';
+    }
+
+    public function generatedDir(): string
+    {
+        return $this->configDir . '/generated';
+    }
+
+    public function receiveSpoolDir(): string
+    {
+        return $this->dataDir . '/receive/spool';
     }
 
     /**

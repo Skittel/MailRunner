@@ -1,0 +1,8 @@
+[Unit]
+Description=MailRunner: generate and activate mail path configuration (spark mr:apply)
+After=mariadb.service
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/bin/rm -f /var/lib/mailrunner/apply.request
+ExecStart=/usr/bin/php /opt/mailrunner/current/spark mr:apply

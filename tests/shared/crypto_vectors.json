@@ -1,0 +1,22 @@
+{
+  "description": "XChaCha20-Poly1305 node-key format MRE1; shared by PHP (NodeCrypto) and Python (mailrunner_rx.crypto)",
+  "key_b64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "nonce_b64": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7",
+  "cases": [
+    {
+      "plaintext_b64": "",
+      "context": "spool:x:eml",
+      "blob_b64": "TVJFMWRlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e0TAG/nKBM+ce8FFrZrO8IQ="
+    },
+    {
+      "plaintext_b64": "SGVsbG8gTWFpbFJ1bm5lcg0K",
+      "context": "spool:20261101T000000Z-0011223344556677:eml",
+      "blob_b64": "TVJFMWRlZmdoaWprbG1ub3BxcnN0dXZ3eHl6ezQWldyQDsTj7lzPSsgB2LtWsWvtT/vBjn3wQlnLpy7tE34="
+    },
+    {
+      "plaintext_b64": "R3LDvMOfZSDinIk=",
+      "context": "db:receive_messages:data",
+      "blob_b64": "TVJFMWRlZmdoaWprbG1ub3BxcnN0dXZ3eHl6ezsBOgw8seyiZawUTAK37SbCyBDbzPYq3Cyfzw=="
+    }
+  ]
+}

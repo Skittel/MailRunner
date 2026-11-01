@@ -1,0 +1,14 @@
+[Unit]
+Description=MailRunner: deletion periods (spark mr:maintenance)
+After=mariadb.service
+
+[Service]
+Type=oneshot
+User=mailrunner
+Group=mailrunner
+ExecStart=/usr/bin/php /opt/mailrunner/current/spark mr:maintenance
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/mailrunner

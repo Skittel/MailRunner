@@ -147,6 +147,7 @@ class ProjectService
     public function bumpRevision(int $projectId): int
     {
         $this->db->query('UPDATE projects SET revision = revision + 1, updated_at = ? WHERE id = ?', [Time::now(), $projectId]);
+        self::requestApply();
 
         return (int) $this->db->query('SELECT revision FROM projects WHERE id = ?', [$projectId])->getRow()->revision;
     }
@@ -198,6 +199,19 @@ class ProjectService
         }
 
         return $builder->get()->getResultArray();
+    }
+
+    /**
+     * Asks the node to regenerate the mail path configuration (systemd path unit
+     * mailrunner-apply.path runs "spark mr:apply" as root). No-op where the data
+     * directory is not writable, e.g. in development.
+     */
+    public static function requestApply(): void
+    {
+        $dir = config('Mailrunner')->dataDir;
+        if (is_dir($dir) && is_writable($dir)) {
+            @touch($dir . '/apply.request');
+        }
     }
 
     public static function refOf(array $project): string

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.0.4 - 2026-11-01
+- Receive mail path, profile `analysis` (first end-to-end version):
+  - Postfix (receive role): no local delivery, no outbound mail; recipients from generated maps;
+    project recipient pattern checked at RCPT TO (`550 5.1.1`).
+  - `mr-deliver` (Python, Postfix pipe): stores mail + SMTP data encrypted in the spool (fsync, json last), no DNS.
+  - `mr-analyze` (Python, systemd path unit): runs the vendored SmartMailFlow analysis
+    (`mailpath/vendor/smartmailflow`, see VENDOR.md), keeps header data + analysis JSON, deletes the raw mail.
+  - `mr:import`: spool -> `receive_messages` (content encrypted), journal `receive.received`.
+- Encryption at rest with a random per-node key (`mr:node:init`), XChaCha20-Poly1305, same format in PHP and
+  Python (shared test vectors).
+- `mr:apply`: generates Postfix maps and routes.json, activates atomically, reloads Postfix. Runs automatically
+  after configuration changes (systemd path unit).
+- Customer API (Bearer token): `GET /v1/node/status`, `GET /v1/journal`, `GET /v1/messages`,
+  `GET /v1/messages/{id}` (record, analysis JSON, raw headers), `POST /v1/messages/ack`.
+- `mr:maintenance`: deletes content after ack / expiry and old metadata (timer, every 15 minutes).
+- `mr:spool:retry`: moves failed spool entries back for another attempt.
+- `install/install.sh`: installs or updates a receive node (packages, user, directories, release with
+  `current`/`previous` symlinks, database, node key, Postfix, systemd units, php-fpm pool, nginx).
+- CLI wrapper `/usr/local/sbin/mailrunner` (runs spark as user `mailrunner`).
+
 ## 0.0.3 - 2026-11-01
 - Database schema (CI4 migrations): journal with gap-free sequence, customers, projects
   (profiles `analysis`, `checked`, `checked_auth`, revision, `managed_by`), API tokens,

@@ -1,0 +1,13 @@
+[Unit]
+Description=MailRunner: analyse new spool entries (mr-analyze)
+
+[Service]
+Type=oneshot
+User=mailrunner
+Group=mailrunner
+ExecStart=/opt/mailrunner/current/mailpath/receive/bin/mr-analyze
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/mailrunner/receive/spool

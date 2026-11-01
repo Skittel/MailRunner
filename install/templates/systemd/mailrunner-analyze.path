@@ -1,0 +1,9 @@
+[Unit]
+Description=MailRunner: analyse new spool entries
+
+[Path]
+PathExistsGlob=/var/lib/mailrunner/receive/spool/new/*.json
+Unit=mailrunner-analyze.service
+
+[Install]
+WantedBy=multi-user.target

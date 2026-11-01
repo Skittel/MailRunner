@@ -19,8 +19,11 @@ final class ChangeContext
 
     public static function cli(bool $force = false): self
     {
-        $user = function_exists('posix_getpwuid') ? (posix_getpwuid(posix_geteuid())['name'] ?? null) : null;
+        $actor = getenv('MR_ACTOR') ?: (getenv('SUDO_USER') ?: null);
+        if ($actor === null && function_exists('posix_getpwuid')) {
+            $actor = posix_getpwuid(posix_geteuid())['name'] ?? null;
+        }
 
-        return new self('cli', $user ?? get_current_user(), $force);
+        return new self('cli', $actor ?? get_current_user(), $force);
     }
 }
