@@ -228,7 +228,8 @@ class MilterTest(unittest.TestCase):
         routes = os.path.join(self.tmp.name, "routes.json")
         with open(routes, "w") as fh:
             json.dump({"routes": {"test.example.org": {"project_id": 1, "project": "smf/test", "profile": "analysis"},
-                                  "in.example.org": {"project_id": 2, "project": "acme/in", "profile": "checked"}}}, fh)
+                                  "in.example.org": {"project_id": 2, "project": "acme/in", "profile": "checked"}},
+                       "role_localparts": ["postmaster", "abuse"]}, fh)
         self.store_dir, self.spool_dir = os.path.join(self.tmp.name, "store"), os.path.join(self.tmp.name, "spool")
         os.makedirs(os.path.join(self.spool_dir, "analyzed"))
         self.patches = [mock.patch.object(cfg, "NODE_KEY_FILE", keyfile), mock.patch.object(cfg, "ROUTES_FILE", routes),
@@ -287,6 +288,14 @@ class MilterTest(unittest.TestCase):
             doc = json.loads(crypto.decrypt(self.key, fh.read(), f"store:{meta['spool_id']}:analysis"))
         self.assertEqual("test0001", doc["record"]["mail_id"])
         self.assertEqual({"spf": {"result": "pass"}}, doc["debug"])
+
+    def test_abuse_mail_keeps_raw_even_with_profile_analysis(self):
+        m, rc, result = self.session(["abuse@test.example.org"], self.fake_analysis)
+        self.assertEqual(self.mm.Milter.DISCARD, result)
+        [meta] = self.handoffs()
+        self.assertEqual("abuse", meta["role"])
+        self.assertIsNotNone(meta["raw_path"])
+        self.assertTrue(os.path.exists(os.path.join(self.store_dir, meta["raw_path"])))
 
     def test_profile_checked_keeps_raw_mail_with_own_received_header(self):
         seen = {}

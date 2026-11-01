@@ -159,7 +159,11 @@ class SelftestHelpersTest(unittest.TestCase):
         run = selftest.Run("node.example.net")
         items, subject = selftest.scenarios(run)
         self.assertIn(run.run_id, subject)
-        self.assertEqual({"pass4", "pass6", "dkim_tampered", "spf_fail", "no_tls", "null_sender", "outlook_to"}, set(items))
+        self.assertEqual({"pass4", "pass6", "dkim_tampered", "spf_fail", "no_tls", "null_sender", "outlook_to", "role_abuse"}, set(items))
+        self.assertEqual("abuse@rx.selftest.test", items["role_abuse"]["rcpt"])
+        self.assertEqual([], items["role_abuse"]["expect"]({"dkim": {"result": "pass"}}, {}, {"role": "abuse", "raw_available": True}))
+        self.assertEqual(["message.raw_available=False expected True"],
+                         items["role_abuse"]["expect"]({"dkim": {"result": "pass"}}, {}, {"role": "abuse", "raw_available": False}))
         self.assertEqual("", items["null_sender"]["mail_from"])
         self.assertTrue(items["pass4"]["raw"].startswith(b"DKIM-Signature:"))
         good = {"spf": {"result": "pass"}, "dkim": {"result": "pass"}, "dmarc": {"result": "pass"},
@@ -189,3 +193,13 @@ class MxNamesTest(unittest.TestCase):
                          selftest.parse_mx_names("mx.example.net=46 MX4.example.net.=4, mx6.example.net=6", "node.example.net"))
         self.assertEqual({"mx.example.net": {4, 6}}, selftest.parse_mx_names("mx.example.net", "node.example.net"))
         self.assertEqual({"node.example.net": None}, selftest.parse_mx_names("", "node.example.net"))
+
+
+class RolesTest(unittest.TestCase):
+    def test_role_lookup(self):
+        from mailrunner_rx.routes import Routes
+        r = Routes({"routes": {"in.example.org": {"project_id": 1}}, "role_localparts": ["postmaster", "abuse"]})
+        self.assertEqual("abuse", r.role("Abuse@IN.example.org"))
+        self.assertEqual("postmaster", r.role("postmaster@x.example"))
+        self.assertIsNone(r.role("abuser@in.example.org"))
+        self.assertIsNone(Routes({"routes": {}}).role("abuse@x.example"))   # old routes.json without the list

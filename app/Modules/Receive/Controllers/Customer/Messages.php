@@ -24,7 +24,7 @@ class Messages extends BaseController
     /** Max page size when the list includes the content (decrypting is per message). */
     private const CONTENT_LIMIT = 100;
 
-    private const LIST_FIELDS = 'id, message_id, spool_id, profile, status, received_at, queue_id, mail_from, rcpt, client_ip, helo,
+    private const LIST_FIELDS = 'id, message_id, spool_id, profile, role, status, received_at, queue_id, mail_from, rcpt, client_ip, helo,
         client_asn, client_as_org, client_country, client_city, client_continent, client_carrier, client_is_threat,
         header_from, header_to, subject, date_hdr, attachments, spf_status, dkim_status, analysis_status, analysis_ms,
         analysis_path, raw_path, size, sha256, acked_at, content_deleted_at, delete_reason';
@@ -159,6 +159,7 @@ class Messages extends BaseController
             'cursor'             => (int) $row['id'],
             'message_id'         => $row['message_id'],
             'profile'            => $row['profile'],
+            'role'               => $row['role'],
             'status'             => $row['status'],
             'received_at'        => Time::toIso($row['received_at']),
             'envelope'           => [

@@ -23,10 +23,17 @@ class ProjectService
      */
     public const JOURNAL_SCOPES = ['own', 'connections', 'unassigned'];
 
+    /**
+     * Delivery of mail to postmaster@/abuse@ (E-18): default = forwarded to the node operator,
+     * api = the customer collects it, forward = forwarded to role_mail_forward_to (needs the send role).
+     */
+    public const ROLE_MAIL = ['default', 'api', 'forward'];
+
     /** Settings that may be changed with update(). */
     private const SETTINGS = [
         'name', 'enabled', 'recipient_pattern', 'recipient_always_allow',
         'delete_after_ack_hours', 'unacked_days', 'metadata_days', 'journal_scope',
+        'role_mail', 'role_mail_forward_to',
     ];
 
     public function __construct(
@@ -103,12 +110,26 @@ class ProjectService
         if (array_key_exists('enabled', $changes)) {
             $changes['enabled'] = $changes['enabled'] ? 1 : 0;
         }
+        if (array_key_exists('role_mail', $changes) && ! in_array($changes['role_mail'], self::ROLE_MAIL, true)) {
+            throw new ConfigException('INVALID_SETTING', 'role_mail must be one of: ' . implode(', ', self::ROLE_MAIL));
+        }
+        if (array_key_exists('role_mail_forward_to', $changes)) {
+            $to = trim((string) $changes['role_mail_forward_to']);
+            if ($to !== '' && filter_var($to, FILTER_VALIDATE_EMAIL) === false) {
+                throw new ConfigException('INVALID_SETTING', 'role_mail_forward_to must be an e-mail address');
+            }
+            $changes['role_mail_forward_to'] = $to === '' ? null : strtolower($to);
+        }
         if (array_key_exists('journal_scope', $changes) && ! in_array($changes['journal_scope'], self::JOURNAL_SCOPES, true)) {
             throw new ConfigException('INVALID_SETTING', 'journal_scope must be one of: ' . implode(', ', self::JOURNAL_SCOPES));
         }
 
         return Transaction::run($this->db, function () use ($ref, $changes, $ctx): array {
             $project = $this->getForChange($ref, $ctx);
+            $merged  = $changes + $project;
+            if (($merged['role_mail'] ?? 'default') === 'forward' && empty($merged['role_mail_forward_to'])) {
+                throw new ConfigException('INVALID_SETTING', 'role_mail forward needs role_mail_forward_to');
+            }
             $row     = $changes;
             if (array_key_exists('recipient_always_allow', $row)) {
                 $row['recipient_always_allow'] = $row['recipient_always_allow'] === null ? null : json_encode($row['recipient_always_allow']);

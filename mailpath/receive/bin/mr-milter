@@ -135,6 +135,7 @@ class ReceiveMilter(Milter.Base):
             self.setreply("452", "4.5.3", "Too many recipients for this transaction")
             return Milter.TEMPFAIL
         self.project_id = route["project_id"]
+        route = dict(route, role=ROUTES.get().role(addr))
         self.recipients.append((addr, route))
         self.session_log("rcpt", f"to=<{log_safe(addr)}> result=accepted")
         return Milter.CONTINUE
@@ -211,12 +212,15 @@ class ReceiveMilter(Milter.Base):
                 "spf_status": record["spf_status"], "dkim_status": record["dkim_status"],
                 "analysis_status": analysis_status,
                 "client_info": client_info((result.get("debug") or {}).get("ipregistry")),
+                "role": route.get("role"),
                 "analysis_ms": round((time.monotonic() - started) * 1000),
             }
-            keep_raw = route["profile"] != "analysis"   # E-12: profile analysis keeps no raw mail
+            # E-12: profile analysis keeps no raw mail; E-18: postmaster/abuse mail is always kept
+            keep_raw = route["profile"] != "analysis" or bool(route.get("role"))
             store.save(config.STORE_DIR, config.SPOOL_DIR, key, message_id, analysis_doc, meta, raw if keep_raw else None)
             log(syslog.LOG_INFO, f"stored id={message_id} queue_id={queue_id} project={route['project']} "
-                                 f"profile={route['profile']} analysis={analysis_status} ms={meta['analysis_ms']} raw_kept={keep_raw}")
+                                 f"profile={route['profile']} analysis={analysis_status} ms={meta['analysis_ms']} raw_kept={keep_raw}"
+                                 + (f" role={route['role']}" if route.get("role") else ""))
         return "keep"
 
 

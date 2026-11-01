@@ -220,8 +220,8 @@ def scenarios(run):
     def rcpt(name):
         return f"st-{run.run_id}-{name}@{RCPT_DOMAIN}"
 
-    def mail(name, hdr_from, outlook=False, sign=None, tamper=False, mail_from=None, family=4, tls=True, expect=None):
-        to_addr = rcpt(name)
+    def mail(name, hdr_from, outlook=False, sign=None, tamper=False, mail_from=None, family=4, tls=True, expect=None, to_addr=None):
+        to_addr = to_addr or rcpt(name)
         raw = mt.build(hdr_from, "PLACEHOLDER-TO" if outlook else to_addr, subject=f"{subject} {name}", domain=f"pass.{ZONE}")
         if outlook:   # like Outlook/M365: display name = quoted address, To header folded over two lines
             raw = raw.replace(b"PLACEHOLDER-TO", f"\"'{to_addr}'\"\r\n\t<{to_addr}>".encode(), 1)
@@ -230,13 +230,14 @@ def scenarios(run):
         if tamper:
             raw = raw.replace(b"von einem Test erzeugt", b"von einem Test VERAENDERT")
         out[name] = {"mail_from": hdr_from.split("<")[-1].strip(">") if mail_from is None else mail_from,
-                     "rcpt": to_addr, "raw": raw, "family": family, "tls": tls, "expect": expect}
+                     "rcpt": to_addr, "raw": raw, "family": family, "tls": tls, "expect": expect,
+                     "subject": f"{subject} {name}"}
 
     def want(**exp):
-        def check(debug, record):
+        def check(debug, record, message=None):
             problems = []
             for path, value in exp.items():
-                node = {"debug": debug, "record": record}
+                node = {"debug": debug, "record": record, "message": message or {}}
                 for part in path.split("__"):
                     node = node.get(part) if isinstance(node, dict) else (node[int(part)] if isinstance(node, list) and part.isdigit() and int(part) < len(node) else None)
                 if node != value:
@@ -264,6 +265,9 @@ def scenarios(run):
     mail("outlook_to", ok_from, outlook=True, sign=("s2048", "s2048.key"),
          expect=want(debug__header__to__0__address=to, debug__header__to__0__display_name_is_address=True,
                      debug__dkim__result="pass"))
+    # E-18: abuse@ is accepted for every project domain (no pattern match needed) and its original is kept
+    mail("role_abuse", ok_from, sign=("s2048", "s2048.key"), to_addr=f"abuse@{RCPT_DOMAIN}",
+         expect=want(message__role="abuse", message__raw_available=True, debug__dkim__result="pass"))
     return out, subject
 
 
@@ -469,7 +473,7 @@ def api_checks(run, items, times, subject, journal_after):
         run.add("api", "api.token", "fail", f"SELFTEST_TOKEN missing in {SELFTEST_ENV}")
         return
     api = Api(run.hostname, env["SELFTEST_TOKEN"])
-    expected = {sc["rcpt"].split("@")[0]: name for name, sc in items.items() if name in times}
+    expected = {sc["subject"]: name for name, sc in items.items() if name in times}   # subject is unique per run
 
     # 1. all delivered mails collectable within 60 s, with complete analysis
     found = {}
@@ -480,9 +484,9 @@ def api_checks(run, items, times, subject, journal_after):
             run.add("api", "api.collect", "fail", f"HTTP {status} {body.get('error', {}).get('code', '')}")
             return
         for m in body.get("data", []):
-            mail_id = (m.get("record") or {}).get("mail_id")
-            if mail_id in expected:
-                found[mail_id] = m
+            key = (m.get("header") or {}).get("subject")
+            if key in expected:
+                found[key] = m
         if len(found) < len(expected):
             time.sleep(2)
     missing = sorted(set(expected) - set(found))
@@ -491,11 +495,11 @@ def api_checks(run, items, times, subject, journal_after):
             (time.monotonic() - t0) * 1000)
 
     # 2. expectations per scenario + completeness + no external quota for own address
-    for mail_id, m in found.items():
-        name = expected[mail_id]
+    for key, m in found.items():
+        name = expected[key]
         debug = m.get("debug") or {}
         problems = [f"missing section {s}" for s in DEBUG_SECTIONS if s not in debug]
-        problems += items[name]["expect"](debug, m.get("record") or {})
+        problems += items[name]["expect"](debug, m.get("record") or {}, m)
         for ext in ("blacklistmaster", "ipregistry"):
             if ext in debug and (debug[ext] or {}).get("status") != "skipped":
                 problems.append(f"{ext} queried for the node's own address")

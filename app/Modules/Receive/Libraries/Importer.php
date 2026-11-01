@@ -84,6 +84,7 @@ class Importer
                 'project_id'      => $project['id'],
                 'spool_id'        => $spoolId,
                 'profile'         => $meta['profile'],
+                'role'            => in_array($meta['role'] ?? null, ConfigBuilder::ROLE_LOCALPARTS, true) ? $meta['role'] : null,
                 'status'          => $status,
                 'received_at'     => (new \DateTimeImmutable($meta['received_at']))->format(Time::DB_FORMAT),
                 'imported_at'     => Time::now(),
@@ -119,6 +120,15 @@ class Importer
                 'message_id' => $messageId, 'status' => $status, 'profile' => $meta['profile'],
                 'analysis' => $meta['analysis_status'] ?? 'ok',
             ]);
+            if (in_array($meta['role'] ?? null, ConfigBuilder::ROLE_LOCALPARTS, true)) {
+                // E-18: mail to postmaster@/abuse@ is noted separately; delivery per project setting role_mail
+                $this->journal->append('receive.role_mail', new ChangeContext('system', 'mr:import'), (int) $project['customer_id'], (int) $project['id'], [
+                    'message_id' => $messageId, 'role' => $meta['role'], 'rcpt' => self::cut($meta['rcpt'] ?? '', 320),
+                    'mail_from' => self::cut($meta['mail_from'] ?? '', 320), 'raw_kept' => ($meta['raw_path'] ?? null) !== null,
+                    'delivery' => $project['role_mail'] ?? 'default',
+                    'forwarded' => false, // forwarding needs the send role (TODO)
+                ]);
+            }
 
             return true;
         });

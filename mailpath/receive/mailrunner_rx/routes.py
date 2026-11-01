@@ -6,6 +6,7 @@ class Routes:
     def __init__(self, data):
         self.revision = data.get("revision")
         self.routes = {k.lower(): v for k, v in data.get("routes", {}).items()}
+        self.role_localparts = {r.lower() for r in data.get("role_localparts", [])}
 
     @classmethod
     def load(cls, path):
@@ -20,3 +21,8 @@ class Routes:
         if rcpt in self.routes:
             return self.routes[rcpt]
         return self.routes.get(rcpt.rsplit("@", 1)[1])
+
+    def role(self, recipient):
+        """RFC 2142 role address (postmaster, abuse) -> its name, else None. Its original mail is always kept."""
+        local = (recipient or "").strip().lower().split("@", 1)[0]
+        return local if local in self.role_localparts else None

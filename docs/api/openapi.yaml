@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MailRunner customer API (receive)
-  version: 0.0.17
+  version: 0.0.18
   description: |
     Pull API of a MailRunner node. A client application collects the messages the node accepted
     for its project. A token belongs to exactly one project and only sees that project's data.
@@ -176,6 +176,8 @@ paths:
         - `smtp.attempt`: one SMTP transaction (MAIL FROM ...) with the recipients of this project, their
           answers and the result. A transaction with recipients of several projects yields one event per
           project, each listing only its own recipients and message ids.
+        - `receive.role_mail`: a mail to postmaster@ or abuse@ (`message_id`, `role`, `rcpt`, `mail_from`, `raw_kept`,
+          `delivery` = project setting default | api | forward, `forwarded`).
         - `smtp.connection`: an SMTP session without MAIL FROM (e.g. scanners, aborted TLS); never
           belongs to a project.
 
@@ -289,6 +291,10 @@ components:
       properties:
         message_id: { type: string, example: mrm_9byxavw4d43pw24d, description: 'unique per node; one message per accepted recipient' }
         profile: { type: string, enum: [analysis, checked, checked_auth] }
+        role:
+          type: [string, 'null']
+          enum: [postmaster, abuse, null]
+          description: 'Mail to postmaster@/abuse@ (accepted for every project domain; the original is always kept, see /raw)'
         status: { type: string, enum: [analyzed, pending] }
         received_at: { type: string, format: date-time }
         envelope:

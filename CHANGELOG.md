@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.18 - 2026-11-01
+- postmaster@ and abuse@ (RFC 2142) are accepted for every domain of every enabled project, independent of
+  the recipient pattern (decision E-18). Domains that only have address routes get both addresses too.
+- Their original mail is always kept (also with profile `analysis`); `role` in the message (API) and the
+  journal event `receive.role_mail` (message id, role, recipient, sender, delivery setting).
+- Project setting `role_mail` (`mr:project:set --role-mail=default|api|forward [--role-mail-forward-to=..]`):
+  `default` = forward to the node operator, `api` = the customer collects them, `forward` = forward to an
+  address. Forwarding needs the send role and is not implemented yet (TODO); until then the mails are kept
+  and can be collected via the API.
+- Self test scenario `role_abuse`: abuse@ accepted, original kept.
+
 ## 0.0.17 - 2026-11-01
 - Journal `smtp.attempt` / `smtp.connection`: `duration_ms` (connect to disconnect) and `tls_ms`.
   `smtp.attempt` also has `timing` (ms after connect): `tls_ms`, `mail_from_ms`, `data_end_ms`, `reply_ms`,
