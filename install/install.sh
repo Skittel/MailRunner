@@ -1,7 +1,7 @@
 #!/bin/bash
 # MailRunner node installer. Idempotent: run again to deploy a new version.
 #
-#   sudo install/install.sh --role=receive --node-id=sirius.eu --hostname=sirius.eu.deepspacerelay.net \
+#   sudo install/install.sh --role=receive --node-id=node1.eu --hostname=mx.example.net \
 #        [--mx-names="mx.example.net=46 mx4.example.net=4 mx6.example.net=6"]
 #
 # Needs: Ubuntu 26.04, a Let's Encrypt certificate for --hostname (webroot /var/www/acme).
@@ -27,7 +27,7 @@ render() { sed -e "s/{{HOSTNAME}}/${HOST}/g" "$1"; }
 
 [[ $EUID -eq 0 ]] || die "run as root"
 [[ "$ROLE" == "receive" ]] || die "--role=receive is required (send is not implemented yet)"
-[[ "$NODE_ID" =~ ^[a-z0-9][a-z0-9.-]{1,62}$ ]] || die "--node-id is required, e.g. sirius.eu"
+[[ "$NODE_ID" =~ ^[a-z0-9][a-z0-9.-]{1,62}$ ]] || die "--node-id is required, e.g. node1.eu"
 [[ "$HOST" =~ ^[a-z0-9.-]+\.[a-z]{2,}$ ]] || die "--hostname is required (FQDN)"
 [[ -f "/etc/letsencrypt/live/$HOST/fullchain.pem" ]] || die "no certificate for $HOST (certbot certonly --webroot -w /var/www/acme -d $HOST)"
 [[ -f "$SOURCE/VERSION" ]] || die "source not found: $SOURCE"

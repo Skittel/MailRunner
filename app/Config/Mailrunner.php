@@ -18,7 +18,7 @@ class Mailrunner extends BaseConfig
     /** Enables the receive role (inbound mail). */
     public bool $receiveEnabled = false;
 
-    /** Immutable node identity, e.g. "sirius.eu". Set once at installation. */
+    /** Immutable node identity, e.g. "node1.eu". Set once at installation. */
     public string $nodeId = '';
 
     /** Directory holding node configuration and keys. */
