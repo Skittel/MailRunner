@@ -172,3 +172,12 @@ class SelftestHelpersTest(unittest.TestCase):
         run.check("base", "base.c", lambda: 1 / 0)
         r = run.result()
         self.assertEqual(("fail", ["base.c"], ["base.b"]), (r["status"], r["failed"], r["warnings"]))
+
+
+class MxNamesTest(unittest.TestCase):
+    def test_parse(self):
+        from mailrunner_rx import selftest
+        self.assertEqual({"mx.example.net": {4, 6}, "mx4.example.net": {4}, "mx6.example.net": {6}},
+                         selftest.parse_mx_names("mx.example.net=46 MX4.example.net.=4, mx6.example.net=6", "node.example.net"))
+        self.assertEqual({"mx.example.net": {4, 6}}, selftest.parse_mx_names("mx.example.net", "node.example.net"))
+        self.assertEqual({"node.example.net": None}, selftest.parse_mx_names("", "node.example.net"))

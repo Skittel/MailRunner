@@ -1,7 +1,7 @@
 #!/usr/bin/python3 -I
 """mr-selftest - self test of a receive node (decision E-17), started by `spark mr:selftest`.
 
-  mr-selftest --hostname=<mx name> [--journal-after=<journal id>] [--base-only]
+  mr-selftest --hostname=<mx name> [--journal-after=<journal id>] [--base-only] [--mx-names="a=46 b=4"]
 
 Prints the result as JSON on stdout. Exit code 0 = pass, 1 = at least one check failed, 2 = self test broken.
 """
@@ -20,7 +20,7 @@ def main():
     try:
         from mailrunner_rx import analyzer, selftest
         analyzer.use_node_resolver()
-        result = selftest.run_all(args["hostname"], int(args.get("journal-after", "0")), "base-only" in args)
+        result = selftest.run_all(args["hostname"], int(args.get("journal-after", "0")), "base-only" in args, args.get("mx-names", ""))
     except Exception as e:
         print(json.dumps({"status": "error", "error": f"{e.__class__.__name__}: {e}"}))
         return 2

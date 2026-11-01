@@ -27,6 +27,12 @@ class Mailrunner extends BaseConfig
     /** Directory holding spool, store and other runtime data. */
     public string $dataDir = '/var/lib/mailrunner';
 
+    /**
+     * MX names of this node with the expected address families, checked by the self test,
+     * e.g. "mx.example.net=46 mx4.example.net=4 mx6.example.net=6". Empty: the node name only.
+     */
+    public string $mxNames = '';
+
     /** Days the journal keeps delivery attempts (smtp.connection / smtp.attempt). */
     public int $smtpJournalDays = 30;
 
@@ -41,6 +47,7 @@ class Mailrunner extends BaseConfig
         $this->configDir      = rtrim((string) (env('MAILRUNNER_CONFIG_DIR') ?? $this->configDir), '/');
         $this->dataDir        = rtrim((string) (env('MAILRUNNER_DATA_DIR') ?? $this->dataDir), '/');
         $this->smtpJournalDays = (int) (env('MAILRUNNER_SMTP_JOURNAL_DAYS') ?? $this->smtpJournalDays);
+        $this->mxNames         = trim((string) (env('MAILRUNNER_MX_NAMES') ?? $this->mxNames));
     }
 
     public function nodeKeyFile(): string

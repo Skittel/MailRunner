@@ -26,12 +26,15 @@ class SelfTest
     /**
      * @return array<string, mixed> result of mr-selftest (status pass|fail|error)
      */
-    public function run(string $hostname, bool $baseOnly = false): array
+    public function run(string $hostname, bool $baseOnly = false, string $mxNames = ''): array
     {
         $after = (int) ($this->db->query('SELECT COALESCE(MAX(id), 0) AS id FROM journal')->getRow('id'));
         $cmd   = [$this->script, '--hostname=' . $hostname, '--journal-after=' . $after];
         if ($baseOnly) {
             $cmd[] = '--base-only';
+        }
+        if ($mxNames !== '') {
+            $cmd[] = '--mx-names=' . $mxNames;
         }
         $proc = proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
         if (! is_resource($proc)) {

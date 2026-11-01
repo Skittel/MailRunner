@@ -1,12 +1,13 @@
 #!/bin/bash
 # MailRunner node installer. Idempotent: run again to deploy a new version.
 #
-#   sudo install/install.sh --role=receive --node-id=sirius.eu --hostname=sirius.eu.deepspacerelay.net
+#   sudo install/install.sh --role=receive --node-id=sirius.eu --hostname=sirius.eu.deepspacerelay.net \
+#        [--mx-names="mx.example.net=46 mx4.example.net=4 mx6.example.net=6"]
 #
 # Needs: Ubuntu 26.04, a Let's Encrypt certificate for --hostname (webroot /var/www/acme).
 set -euo pipefail
 
-ROLE=""; NODE_ID=""; HOST=""; DB_NAME="mailrunner"
+ROLE=""; NODE_ID=""; HOST=""; DB_NAME="mailrunner"; MX_NAMES=""
 SOURCE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 for arg in "$@"; do
     case "$arg" in
@@ -15,6 +16,7 @@ for arg in "$@"; do
         --hostname=*) HOST="${arg#*=}" ;;
         --db-name=*) DB_NAME="${arg#*=}" ;;
         --source=*) SOURCE="${arg#*=}" ;;
+        --mx-names=*) MX_NAMES="${arg#*=}" ;;   # e.g. "mx.example.net=46 mx4.example.net=4" (self test)
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
@@ -84,6 +86,11 @@ ENV
     umask 022
     chown root:mailrunner /etc/mailrunner/app.env
     chmod 0640 /etc/mailrunner/app.env
+fi
+if [[ -n "$MX_NAMES" ]]; then
+    [[ "$MX_NAMES" =~ ^[a-z0-9.=46\ ,-]+$ ]] || die "--mx-names: invalid characters"
+    sed -i '/^MAILRUNNER_MX_NAMES = /d' /etc/mailrunner/app.env
+    echo "MAILRUNNER_MX_NAMES = \"$MX_NAMES\"" >> /etc/mailrunner/app.env
 fi
 
 if [[ ! -f /etc/mailrunner/secrets.env ]]; then

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.16 - 2026-11-01
+- Self test checks every MX name of the node: node setting `MAILRUNNER_MX_NAMES` (installer option
+  `--mx-names="mx.example.net=46 mx4.example.net=4 mx6.example.net=6"`). Per name: address families exactly
+  as configured, all addresses on this node, STARTTLS with a valid certificate for that name over every
+  family. Without the setting only the node name is checked.
+- Self test warns about route domains whose MX does not point to this node.
+- MX check sessions make a short transaction to the self test project, so they never show up as
+  `smtp.connection` in other projects' journals.
+
 ## 0.0.15 - 2026-11-01
 - The vendored SmartMailFlow analysis library and its tests (`mailpath/vendor/smartmailflow`) are now part
   of the repository. Before, the unanchored `.gitignore` rule `vendor/` (meant for Composer) also excluded

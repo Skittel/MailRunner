@@ -25,7 +25,7 @@ class SelfTestCommand extends MrCommand
             throw new \RuntimeException('app.baseURL has no host name');
         }
         $selftest = new SelfTest(db_connect(), service('journalWriter'), ROOTPATH . 'mailpath/receive/bin/mr-selftest', $config->dataDir . '/selftest');
-        $result   = $selftest->run($hostname, $this->option('base-only') !== null);
+        $result   = $selftest->run($hostname, $this->option('base-only') !== null, $config->mxNames);
 
         if ($this->json()) {
             $this->outputJson($result);

@@ -3,6 +3,9 @@
 Groups:
   base     services, disk, mail queue, spool backlog, time sync, node key, DNSSEC, Spamhaus DQS key,
            reachability of the external APIs (no quota), local test zone
+  mx       every MX name of the node (MAILRUNNER_MX_NAMES, e.g. "mx.example=46 mx4.example=4"): address
+           families exactly as configured, all addresses on this node, STARTTLS + certificate per family;
+           route domains whose MX does not point to this node (warning)
   smtp     delivery over the node's public IPv4/IPv6 on port 25: STARTTLS, certificate (name, >= 14 days),
            rejections (recipient pattern, no open relay), postmaster accepted, time until 250
   analysis fixed scenarios with sender domains from the local zone selftest.test (expected results)
@@ -363,6 +366,85 @@ def smtp_checks(run, items):
     return times
 
 
+# --------------------------------------------------------------------------- mx names
+def parse_mx_names(spec, hostname):
+    """'a.example=46 b.example=4' -> {name: {4, 6}}. Empty -> the node name with the families it has in DNS."""
+    out = {}
+    for item in (spec or "").replace(",", " ").split():
+        name, _, fams = item.partition("=")
+        out[name.strip().lower().rstrip(".")] = {int(c) for c in (fams or "46") if c in "46"}
+    return out or {hostname: None}
+
+
+def mx_checks(run, spec):
+    """Per MX name of the node: address families exactly as configured, all addresses belong to the node,
+    STARTTLS with a valid certificate for that name over every family. Each check session makes one short
+    transaction to the self test project (no smtp.connection entries in other projects' journals)."""
+    from . import analyzer
+    own = analyzer.node_addresses()
+    names = parse_mx_names(spec, run.hostname)
+    for name, expected in names.items():
+        addrs = own_addresses(name)
+        have = {f for f in (4, 6) if addrs.get(f)}
+        if expected is not None:
+            ok = have == expected
+            run.add("mx", f"mx.{name}.dns", "ok" if ok else "fail",
+                    f"families {sorted(have)}" + ("" if ok else f", expected {sorted(expected)}"))
+        foreign = [a for f in (4, 6) for a in addrs.get(f, []) if a not in own]
+        if foreign:
+            run.add("mx", f"mx.{name}.addresses", "fail", f"{len(foreign)} address(es) not on this node")
+        for fam in sorted(have):
+            label = f"mx.{name}.v{fam}"
+            t0 = time.monotonic()
+            try:
+                s = smtplib.SMTP(timeout=30)
+                s.connect(addrs[fam][0], 25)
+                s._host = name   # SNI and certificate name
+                s.ehlo(HELO)
+                s.starttls(context=ssl.create_default_context())
+                version = s.sock.version()
+                s.ehlo(HELO)
+                s.mail(f"ok@pass.{ZONE}")
+                code, _ = s.rcpt(f"postmaster@{RCPT_DOMAIN}")
+                s.rset()
+                s.quit()
+                run.add("mx", label, "ok" if code == 250 else "fail",
+                        f"{version}, certificate valid for {name}" + ("" if code == 250 else f", RCPT {code}"),
+                        (time.monotonic() - t0) * 1000)
+            except Exception as e:
+                run.add("mx", label, "fail", f"{e.__class__.__name__}: {getattr(e, 'verify_message', None) or e}",
+                        (time.monotonic() - t0) * 1000)
+
+
+def route_mx_checks(run):
+    """Warn about route domains whose MX does not point to this node (mail would not arrive here)."""
+    from . import analyzer
+    import dns.resolver
+    own = analyzer.node_addresses()
+    try:
+        with open(config.ROUTES_FILE) as fh:
+            routes = json.load(fh).get("routes", {})
+    except (OSError, ValueError) as e:
+        run.add("mx", "mx.routes", "fail", f"routes.json not readable: {e}")
+        return
+    domains = sorted({r for r in routes if "@" not in r and not r.endswith("." + ZONE)})
+    bad = []
+    r = resolver()
+    for d in domains:
+        try:
+            targets = [str(x.exchange).rstrip(".") for x in r.resolve(d, "MX")]
+        except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+            targets = [d]   # implicit MX
+        except Exception:
+            bad.append(f"{d} (MX lookup failed)")
+            continue
+        points_here = any(a in own for t in targets for fam in (4, 6) for a in own_addresses(t).get(fam, []))
+        if not points_here:
+            bad.append(d)
+    run.add("mx", "mx.routes", "warn" if bad else "ok",
+            ("MX not pointing to this node: " + ", ".join(bad)) if bad else f"{len(domains)} route domains point here")
+
+
 # --------------------------------------------------------------------------- api
 class Api:
     def __init__(self, hostname, token):
@@ -489,9 +571,12 @@ def api_checks(run, items, times, subject, journal_after):
 
 
 # --------------------------------------------------------------------------- main
-def run_all(hostname, journal_after=0, skip_mail=False):
+def run_all(hostname, journal_after=0, skip_mail=False, mx_names=""):
     run = Run(hostname)
     zone_ok = base_checks(run)
+    if zone_ok:
+        mx_checks(run, mx_names)
+    route_mx_checks(run)
     if skip_mail:
         return run.result()
     if not zone_ok:
