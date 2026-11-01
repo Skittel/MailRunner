@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.15 - 2026-11-01
+- The vendored SmartMailFlow analysis library and its tests (`mailpath/vendor/smartmailflow`) are now part
+  of the repository. Before, the unanchored `.gitignore` rule `vendor/` (meant for Composer) also excluded
+  `mailpath/vendor`, so a fresh clone had no analysis library. The rule is now `/vendor/`.
+
 ## 0.0.14 - 2026-11-01
 - Self test (decision E-17).
   - Level 1: SmartMailFlow's 102 analysis tests (fixed DNS, no network) are vendored and run with the

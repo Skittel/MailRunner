@@ -84,7 +84,8 @@ php_errors.log
 #-------------------------
 # Composer
 #-------------------------
-vendor/
+# anchored: only Composer's vendor/; mailpath/vendor holds vendored code that belongs in the repo
+/vendor/
 
 #-------------------------
 # IDE / Development Files
