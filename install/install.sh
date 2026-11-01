@@ -93,7 +93,7 @@ BLM_USER=
 BLM_PASS=
 
 # ipregistry.co API key (AS, country, city, continent, carrier, threat of the client IP)
-IPREGISTRY_API_KEY=
+IPREGISTRYIO_TOKEN=
 
 # Cache lifetimes in seconds (default 3600)
 SPAMHAUS_CACHE_SECONDS=3600

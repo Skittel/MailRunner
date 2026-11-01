@@ -1,7 +1,10 @@
 # Changelog
 
+## 0.0.10 - 2026-11-01
+- ipregistry key name in `secrets.env` is `IPREGISTRYIO_TOKEN` (matches `IPREGISTRYIO_CACHE_SECONDS`).
+
 ## 0.0.9 - 2026-11-01
-- ipregistry.co lookup of the client IP (`IPREGISTRY_API_KEY` in `secrets.env`): AS number, organization,
+- ipregistry.co lookup of the client IP (key in `secrets.env`, see 0.0.10): AS number, organization,
   domain, route and type, country, city, continent, carrier, `security.is_threat`. Result in
   `debug.ipregistry`; cached 1 hour per IP (`IPREGISTRYIO_CACHE_SECONDS`), only successful answers.
   Loopback/private addresses are not sent; errors never contain the API key.

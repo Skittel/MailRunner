@@ -123,8 +123,8 @@ def analyze(raw, envelope, creds, mail_id, timeout):
             if creds.get("BLM_USER") and creds.get("BLM_PASS"):
                 result["debug"]["blacklistmaster"] = blacklistmaster_cached(
                     envelope["client_ip"], mail_id, creds["BLM_USER"], creds["BLM_PASS"])
-            if creds.get("IPREGISTRY_API_KEY"):
-                result["debug"]["ipregistry"] = ipregistry_cached(envelope["client_ip"], creds["IPREGISTRY_API_KEY"])
+            if creds.get("IPREGISTRYIO_TOKEN"):
+                result["debug"]["ipregistry"] = ipregistry_cached(envelope["client_ip"], creds["IPREGISTRYIO_TOKEN"])
             box["result"] = result
         except Exception as e:  # reported to the caller
             box["error"] = e
