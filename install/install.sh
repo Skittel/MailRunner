@@ -88,9 +88,13 @@ if [[ ! -f /etc/mailrunner/secrets.env ]]; then
 # Spamhaus Data Query Service key (DNSBL via zen.dq.spamhaus.net)
 SPAMHAUS_DQS_KEY=
 
-# blacklistmaster.com API (both needed; one API call per analysed mail)
+# blacklistmaster.com API (both needed; one API call per analysed mail and IP, see cache)
 BLM_USER=
 BLM_PASS=
+
+# Cache lifetimes in seconds for Spamhaus answers and blacklistmaster results (default 3600)
+SPAMHAUS_CACHE_SECONDS=3600
+BLM_CACHE_SECONDS=3600
 SECRETS
 fi
 

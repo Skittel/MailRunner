@@ -151,6 +151,7 @@ class ReceiveMilter(Milter.Base):
     def process(self, raw, queue_id, started):
         key = crypto.load_key(config.NODE_KEY_FILE)
         creds = secrets.load()
+        analyzer.configure_caches(creds)
         received_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         summary = message.summary(raw)
         attachments = message.attachments(raw)

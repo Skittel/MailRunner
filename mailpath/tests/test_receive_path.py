@@ -124,6 +124,59 @@ class SecretsTest(unittest.TestCase):
         self.assertIn("[IPv6:2001:db8::1]", hdr)
 
 
+class CacheTest(unittest.TestCase):
+    def test_ttl_cache_expires_and_limits_size(self):
+        from mailrunner_rx.cache import TTLCache
+        c = TTLCache(3600, max_entries=2)
+        c.put("a", 1)
+        c.put("b", 2)
+        c.put("c", 3)
+        self.assertEqual(2, len(c))
+        self.assertIsNone(c.get("a"))
+        self.assertEqual(3, c.get("c")[0])
+        with mock.patch("time.time", return_value=c.get("c")[1] + 3600):
+            self.assertIsNone(c.get("c"))
+
+    def test_spamhaus_answers_cached_but_not_errors_and_other_names_untouched(self):
+        from mailrunner_rx import analyzer
+        analyzer.SPAMHAUS_CACHE = analyzer.TTLCache(3600)
+        calls = []
+        answers = {"2.0.0.127.key.zen.dq.spamhaus.net": (["127.0.0.2"], None),
+                   "1.2.0.192.key.zen.dq.spamhaus.net": ([], "timeout"),
+                   "example.org": (["192.0.2.1"], None)}
+
+        def fake(self, name, rtype):
+            calls.append(name)
+            return answers[name]
+        with mock.patch.object(analyzer.smf_dnsclient.DNSClient, "_lookup", fake):
+            for _ in range(2):
+                c = analyzer.CachingDNSClient()
+                for name in answers:
+                    c._lookup(name, "A")
+        self.assertEqual(1, calls.count("2.0.0.127.key.zen.dq.spamhaus.net"), "listed answer cached")
+        self.assertEqual(2, calls.count("1.2.0.192.key.zen.dq.spamhaus.net"), "timeout not cached")
+        self.assertEqual(2, calls.count("example.org"), "other names only via unbound (TTL)")
+        self.assertIn("2.0.0.127.key.zen.dq.spamhaus.net", c.cache_hits)
+        debug = {"dnsbl": {"lists": [{"zone": "zen.dq.spamhaus.net", "name": "Spamhaus ZEN (DQS)"}, {"zone": "bl.spamcop.net", "name": "SpamCop"}]}}
+        analyzer.mark_cached_dnsbl(debug, c)
+        self.assertTrue(debug["dnsbl"]["lists"][0]["cached"])
+        self.assertNotIn("cached", debug["dnsbl"]["lists"][1])
+
+    def test_blacklistmaster_cached_per_ip_errors_not(self):
+        from mailrunner_rx import analyzer
+        analyzer.BLM_CACHE = analyzer.TTLCache(3600)
+        results = iter([{"status": "Not blacklisted"}, "http_500", "http_500"])
+        with mock.patch.object(analyzer.blacklistmaster, "check", side_effect=lambda *a: next(results)) as check:
+            first = analyzer.blacklistmaster_cached("198.51.100.7", "abcdefgh", "u", "p")
+            second = analyzer.blacklistmaster_cached("198.51.100.7", "abcdefgh", "u", "p")
+            analyzer.blacklistmaster_cached("198.51.100.8", "abcdefgh", "u", "p")
+            analyzer.blacklistmaster_cached("198.51.100.8", "abcdefgh", "u", "p")
+        self.assertEqual({"status": "Not blacklisted"}, first)
+        self.assertTrue(second["cached"])
+        self.assertIn("cached_at", second)
+        self.assertEqual(3, check.call_count, "first IP once, error for second IP twice")
+
+
 def load_milter_module():
     path = os.path.join(ROOT, "mailpath", "receive", "bin", "mr-milter")
     loader = importlib.machinery.SourceFileLoader("mr_milter", path)

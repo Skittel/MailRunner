@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.8 - 2026-11-01
+- Spamhaus answers (Spamhaus TTL is 1 s) and blacklistmaster results are kept for 1 hour in the milter
+  (in memory, shared by all messages). Only real answers are cached (listed / not listed), never timeouts
+  or errors. Cached entries carry `cached: true` and `cached_at` in the analysis JSON.
+  Lifetimes: `SPAMHAUS_CACHE_SECONDS`, `BLM_CACHE_SECONDS` in `/etc/mailrunner/secrets.env` (default 3600).
+
 ## 0.0.7 - 2026-11-01
 - Receive decisions before the 250 (decision E-11): new `mr-milter` (Python, pymilter) replaces the pipe
   (`mr-deliver`, `mr-analyze`). At end of data it stores the message, runs the analysis for every message and
