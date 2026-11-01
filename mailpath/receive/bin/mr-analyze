@@ -2,7 +2,8 @@
 """mr-analyze - processes spool/new/ (started by systemd path unit, runs as mailrunner).
 
 Profile "analysis": runs the SmartMailFlow analysis on the node and writes an analysed entry
-that holds only the header data and the analysis JSON. The raw mail is deleted right after
+that holds only the header data and the analysis JSON. Node-wide credentials (Spamhaus DQS,
+blacklistmaster) come from /etc/mailrunner/secrets.env. The raw mail is deleted right after
 the analysis (decision E-05/E-07). Other profiles are not implemented yet; their entries are
 moved to spool/failed/ (kept encrypted, never deleted silently).
 """
@@ -17,7 +18,7 @@ BASE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..")
 sys.path.insert(0, BASE)
 sys.path.insert(0, os.path.join(BASE, "..", "vendor", "smartmailflow"))
 
-from mailrunner_rx import analysis_config, blacklistmaster, config, spool  # noqa: E402
+from mailrunner_rx import blacklistmaster, config, secrets, spool  # noqa: E402
 from mailrunner_rx.crypto import load_key  # noqa: E402
 
 
@@ -33,31 +34,30 @@ def localpart(addr):
     return addr.split("@")[0] if "@" in addr else ""
 
 
-def analyze_entry(raw, meta, settings):
+def analyze_entry(raw, meta, creds):
     from smartmailflow.analysis import analyze
     from smartmailflow.dnsclient import DNSClient
 
     envelope = {"client_ip": meta["client_ip"] or "0.0.0.0", "helo": meta["helo"] or "unknown",
                 "mail_from": meta["mail_from"], "rcpt": meta["rcpt"]}
-    result = analyze(raw, envelope, DNSClient(), {"spamhaus_dqs_key": settings.get("spamhaus_dqs_key")})
+    result = analyze(raw, envelope, DNSClient(), {"spamhaus_dqs_key": creds.get("SPAMHAUS_DQS_KEY")})
     msg = email.message_from_bytes(raw)
     # same rule as SmartMailFlow's receive pipe
     mail_id = (localpart(meta["rcpt"]) or localpart(parseaddr(msg.get("To", ""))[1])
                or (msg.get("Message-ID") or "").strip("<>"))
-    if settings.get("blacklistmaster"):
-        bm = settings["blacklistmaster"]
-        result["debug"]["blacklistmaster"] = blacklistmaster.check(envelope["client_ip"], mail_id, bm["user"], bm["pass"])
+    if creds.get("BLM_USER") and creds.get("BLM_PASS"):
+        result["debug"]["blacklistmaster"] = blacklistmaster.check(envelope["client_ip"], mail_id, creds["BLM_USER"], creds["BLM_PASS"])
     return {**result, "mail_id": mail_id, "raw_headers": raw_header_block(raw)}
 
 
-def process(spool_id, key, settings_by_project):
+def process(spool_id, key, creds):
     meta = spool.read_meta(config.SPOOL_DIR, "new", spool_id, key)
     if meta["profile"] != "analysis":
         spool.move_to_failed(config.SPOOL_DIR, "new", spool_id, f"profile {meta['profile']} not implemented yet")
         syslog.syslog(syslog.LOG_WARNING, f"spool_id={spool_id} profile={meta['profile']} not implemented, moved to failed")
         return
     raw = spool.read_raw(config.SPOOL_DIR, "new", spool_id, key)
-    meta["analysis"] = analyze_entry(raw, meta, settings_by_project.get(str(meta["project_id"]), {}))
+    meta["analysis"] = analyze_entry(raw, meta, creds)
     meta["raw_deleted"] = True
     spool.write_entry(config.SPOOL_DIR, "analyzed", spool_id, key, meta)   # header data + JSON only
     spool.remove(config.SPOOL_DIR, "new", spool_id)                      # raw mail is gone now
@@ -72,10 +72,10 @@ def main():
     except BlockingIOError:
         return 0  # another run is active
     key = load_key(config.NODE_KEY_FILE)
-    settings_by_project = analysis_config.load(key)
+    creds = secrets.load()
     for spool_id in spool.ready_ids(config.SPOOL_DIR, "new"):
         try:
-            process(spool_id, key, settings_by_project)
+            process(spool_id, key, creds)
         except Exception as e:
             spool.move_to_failed(config.SPOOL_DIR, "new", spool_id, f"{e.__class__.__name__}: {e}")
             syslog.syslog(syslog.LOG_ERR, f"spool_id={spool_id} failed: {e.__class__.__name__}: {e}")

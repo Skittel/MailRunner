@@ -88,16 +88,15 @@ class DeliverTest(unittest.TestCase):
 
 
 
-class AnalysisConfigTest(unittest.TestCase):
-    def test_reads_encrypted_settings_written_by_php_format(self):
-        from mailrunner_rx import analysis_config
-        key = os.urandom(32)
+class SecretsTest(unittest.TestCase):
+    def test_reads_env_file_ignores_comments_and_empty_values(self):
+        from mailrunner_rx import secrets
         with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "analysis.json.enc")
-            with open(path, "wb") as fh:
-                fh.write(crypto.encrypt(key, b'{"projects":{"1":{"spamhaus_dqs_key":"abc"}}}\n', "generated:analysis.json"))
-            self.assertEqual({"1": {"spamhaus_dqs_key": "abc"}}, analysis_config.load(key, path))
-            self.assertEqual({}, analysis_config.load(key, os.path.join(tmp, "missing")))
+            path = os.path.join(tmp, "secrets.env")
+            with open(path, "w") as fh:
+                fh.write("# comment\nSPAMHAUS_DQS_KEY=abc123\nBLM_USER = 'user'\nBLM_PASS=\n")
+            self.assertEqual({"SPAMHAUS_DQS_KEY": "abc123", "BLM_USER": "user"}, secrets.load(path))
+            self.assertEqual({}, secrets.load(os.path.join(tmp, "missing")))
 
     def test_blacklistmaster_skips_selftests(self):
         from mailrunner_rx import blacklistmaster

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.6 - 2026-11-01
+- Analysis credentials are node-wide now: `/etc/mailrunner/secrets.env` (`SPAMHAUS_DQS_KEY`, `BLM_USER`,
+  `BLM_PASS`, same names as SmartMailFlow). `install.sh` creates an empty template.
+- Removed the project secrets of 0.0.5 (`mr:secret:*`, table `project_secrets` dropped by migration).
+
 ## 0.0.5 - 2026-11-01
 - Project secrets (`project_secrets`), encrypted with the node key; only known names
   (`spamhaus_dqs_key`, `blacklistmaster_user`, `blacklistmaster_pass`). Values are read from stdin and never shown.

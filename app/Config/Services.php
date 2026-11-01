@@ -6,7 +6,6 @@ use App\Core\Access\ApiTokenService;
 use App\Core\Access\SmtpCredentialService;
 use App\Core\Journal\JournalWriter;
 use App\Core\Projects\CustomerService;
-use App\Core\Projects\ProjectSecretService;
 use App\Core\Projects\ProjectService;
 use App\Modules\Receive\Libraries\RouteService;
 use CodeIgniter\Config\BaseService;
@@ -71,12 +70,4 @@ class Services extends BaseService
         return new RouteService(db_connect(), static::journalWriter(), static::projectService());
     }
 
-    public static function projectSecretService(bool $getShared = true): ProjectSecretService
-    {
-        if ($getShared) {
-            return static::getSharedInstance('projectSecretService');
-        }
-
-        return new ProjectSecretService(db_connect(), static::journalWriter(), static::projectService());
-    }
 }

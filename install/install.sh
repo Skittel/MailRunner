@@ -77,6 +77,22 @@ ENV
     chmod 0640 /etc/mailrunner/app.env
 fi
 
+if [[ ! -f /etc/mailrunner/secrets.env ]]; then
+    log "/etc/mailrunner/secrets.env (empty template, fill in the values)"
+    install -o root -g mailrunner -m 0640 /dev/null /etc/mailrunner/secrets.env
+    cat > /etc/mailrunner/secrets.env <<'SECRETS'
+# MailRunner node credentials for the analysis (root:mailrunner 0640). Never commit.
+# Same names as SmartMailFlow's secrets.env. Empty = not used.
+
+# Spamhaus Data Query Service key (DNSBL via zen.dq.spamhaus.net)
+SPAMHAUS_DQS_KEY=
+
+# blacklistmaster.com API (both needed; one API call per analysed mail)
+BLM_USER=
+BLM_PASS=
+SECRETS
+fi
+
 log "Release $VERSION"
 REL="/opt/mailrunner/releases/${VERSION}-$(date -u +%Y%m%d%H%M%S)"
 rsync -a --exclude /.git --exclude /vendor --exclude /.env --exclude /writable --exclude __pycache__ \
