@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.11 - 2026-11-01
+- Customer API: `GET /v1/messages?include=content` returns `record`, `debug` and `raw_headers` with
+  every message (page size max 100), so a client collects with one request per page instead of one per message.
+- OpenAPI 3.1 description of the customer API in `docs/api/openapi.yaml`.
+- Feature tests for the collection flow (list with content, ack, project isolation, authentication).
+
 ## 0.0.10 - 2026-11-01
 - ipregistry key name in `secrets.env` is `IPREGISTRYIO_TOKEN` (matches `IPREGISTRYIO_CACHE_SECONDS`).
 

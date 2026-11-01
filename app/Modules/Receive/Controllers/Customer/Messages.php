@@ -13,13 +13,17 @@ use App\Modules\Receive\Libraries\MessageStore;
 /**
  * Received messages of the token's project.
  *
- * GET  /v1/messages?after_id=&limit=&acked=0|1  list (metadata only)
+ * GET  /v1/messages?after_id=&limit=&acked=0|1[&include=content]
+ *                                              list (metadata; with include=content also record/debug/raw_headers, limit max 100)
  * GET  /v1/messages/{message_id}                metadata + record (header data) + debug (analysis JSON) + raw_headers
  * GET  /v1/messages/{message_id}/raw            original mail (message/rfc822), only if kept (not for profile analysis)
  * POST /v1/messages/ack {"message_ids":[...]}   confirm collection (idempotent)
  */
 class Messages extends BaseController
 {
+    /** Max page size when the list includes the content (decrypting is per message). */
+    private const CONTENT_LIMIT = 100;
+
     private const LIST_FIELDS = 'id, message_id, spool_id, profile, status, received_at, queue_id, mail_from, rcpt, client_ip, helo,
         client_asn, client_as_org, client_country, client_city, client_continent, client_carrier, client_is_threat,
         header_from, header_to, subject, date_hdr, attachments, spf_status, dkim_status, analysis_status, analysis_ms,
@@ -27,8 +31,13 @@ class Messages extends BaseController
 
     public function index()
     {
-        $after   = max(0, (int) ($this->request->getGet('after_id') ?? 0));
-        $limit   = max(1, min(1000, (int) ($this->request->getGet('limit') ?? 100)));
+        $include = (string) ($this->request->getGet('include') ?? '');
+        if (! in_array($include, ['', 'content'], true)) {
+            return ApiResponse::error(400, 'INVALID_REQUEST', 'include must be "content" or empty');
+        }
+        $withContent = $include === 'content';
+        $after       = max(0, (int) ($this->request->getGet('after_id') ?? 0));
+        $limit       = max(1, min($withContent ? self::CONTENT_LIMIT : 1000, (int) ($this->request->getGet('limit') ?? 100)));
         $builder = db_connect()->table('receive_messages')->select(self::LIST_FIELDS)
             ->where('project_id', CurrentToken::projectId())->where('id >', $after)
             ->orderBy('id')->limit($limit);
@@ -38,10 +47,15 @@ class Messages extends BaseController
         } elseif ($acked === '1') {
             $builder->where('acked_at IS NOT NULL');
         }
-        $rows = array_map([self::class, 'present'], $builder->get()->getResultArray());
+        $raw  = $builder->get()->getResultArray();
+        $rows = array_map([self::class, 'present'], $raw);
+        $data = [];
+        foreach ($rows as $i => $r) {
+            $data[] = array_diff_key($r, ['cursor' => 1]) + ($withContent ? self::content($raw[$i]) : []);
+        }
 
         return ApiResponse::ok([
-            'data'          => array_map(static fn ($r) => array_diff_key($r, ['cursor' => 1]), $rows),
+            'data'          => $data,
             'next_after_id' => $rows === [] ? $after : end($rows)['cursor'],
             'has_more'      => count($rows) === $limit,
         ]);
@@ -53,13 +67,26 @@ class Messages extends BaseController
         if ($row === null) {
             return ApiResponse::error(404, 'MESSAGE_NOT_FOUND', 'Message not found');
         }
+
+        return ApiResponse::ok(['data' => array_diff_key(self::present($row), ['cursor' => 1]) + self::content($row)]);
+    }
+
+    /**
+     * Decrypted analysis content (null fields once the content is deleted).
+     *
+     * @param array<string, mixed> $row
+     *
+     * @return array{record: mixed, debug: mixed, raw_headers: mixed}
+     */
+    private static function content(array $row): array
+    {
         $analysis = $row['analysis_path'] === null ? null : MessageStore::forNode()->analysis($row['spool_id'], $row['analysis_path']);
 
-        return ApiResponse::ok(['data' => array_diff_key(self::present($row), ['cursor' => 1]) + [
+        return [
             'record'      => $analysis['record'] ?? null,
             'debug'       => $analysis['debug'] ?? null,
             'raw_headers' => $analysis['raw_headers'] ?? null,
-        ]]);
+        ];
     }
 
     public function raw(string $messageId)

@@ -12,7 +12,7 @@ when it was delivered or collected.
 
 **Status:** early development (0.0.x). The receive role is built first.
 
-**Documentation:** https://wiki.skit.center/books/mailrunnerpub
+**Documentation:** https://wiki.skit.center/books/mailrunnerpub · API: [`docs/api/openapi.yaml`](docs/api/openapi.yaml)
 
 ## Layout
 
