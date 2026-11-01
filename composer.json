@@ -1,0 +1,40 @@
+{
+    "name": "skittel/mailrunner",
+    "description": "MailRunner: independent mail nodes for sending and receiving with API and SMTP",
+    "type": "project",
+    "homepage": "https://github.com/Skittel/MailRunner",
+    "require": {
+        "php": "^8.4",
+        "codeigniter4/framework": "^4.7",
+        "ext-sodium": "*",
+        "ext-mysqli": "*",
+        "ext-intl": "*"
+    },
+    "require-dev": {
+        "fakerphp/faker": "^1.9",
+        "mikey179/vfsstream": "^1.6",
+        "phpunit/phpunit": "^10.5.16"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/",
+            "Config\\": "app/Config/"
+        },
+        "exclude-from-classmap": [
+            "**/Database/Migrations/**"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\Support\\": "tests/_support"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "preferred-install": "dist",
+        "sort-packages": true
+    },
+    "scripts": {
+        "test": "phpunit"
+    }
+}

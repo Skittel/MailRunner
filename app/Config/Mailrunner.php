@@ -1,0 +1,67 @@
+<?php
+
+namespace Config;
+
+use CodeIgniter\Config\BaseConfig;
+
+/**
+ * MailRunner node configuration.
+ *
+ * Node-specific values come from the environment (.env or /etc/mailrunner/*.env),
+ * never from this file. Defaults here are safe for development only.
+ */
+class Mailrunner extends BaseConfig
+{
+    /** Enables the send role (outbound mail). */
+    public bool $sendEnabled = false;
+
+    /** Enables the receive role (inbound mail). */
+    public bool $receiveEnabled = false;
+
+    /** Immutable node identity, e.g. "sirius.eu". Set once at installation. */
+    public string $nodeId = '';
+
+    /** Directory holding node configuration and keys. */
+    public string $configDir = '/etc/mailrunner';
+
+    /** Directory holding spool, store and other runtime data. */
+    public string $dataDir = '/var/lib/mailrunner';
+
+    public function __construct()
+    {
+        parent::__construct();
+
+        // CI4 maps env keys "mailrunner.<property>"; also accept the documented flat names.
+        $this->sendEnabled    = $this->envBool('MAILRUNNER_SEND_ENABLED', $this->sendEnabled);
+        $this->receiveEnabled = $this->envBool('MAILRUNNER_RECEIVE_ENABLED', $this->receiveEnabled);
+        $this->nodeId         = (string) (env('MAILRUNNER_NODE_ID') ?? $this->nodeId);
+    }
+
+    /**
+     * Returns the enabled roles as a list, e.g. ["receive", "send"].
+     *
+     * @return list<string>
+     */
+    public function roles(): array
+    {
+        $roles = [];
+        if ($this->receiveEnabled) {
+            $roles[] = 'receive';
+        }
+        if ($this->sendEnabled) {
+            $roles[] = 'send';
+        }
+
+        return $roles;
+    }
+
+    private function envBool(string $key, bool $default): bool
+    {
+        $value = env($key);
+        if ($value === null) {
+            return $default;
+        }
+
+        return filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? $default;
+    }
+}
