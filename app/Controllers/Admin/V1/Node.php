@@ -9,7 +9,7 @@ use App\Core\Support\Time;
 
 /**
  * GET /admin/v1/node     identity, version, roles, last self test (full), key figures
- * GET /admin/v1/journal  node-wide journal (all projects), ?after_id=&limit=&event=a,b
+ * GET /admin/v1/journal  node-wide journal (all projects), ?after_id=&limit=&event=a,b; latest=1: newest first
  */
 class Node extends AdminController
 {
@@ -46,7 +46,9 @@ class Node extends AdminController
         $b     = db_connect()->table('journal j')
             ->select('j.id, j.created_at, j.event, j.source, j.actor, j.details, c.customer_key, p.project_key')
             ->join('customers c', 'c.id = j.customer_id', 'left')->join('projects p', 'p.id = j.project_id', 'left')
-            ->where('j.id >', $after)->orderBy('j.id')->limit($limit);
+            ->limit($limit);
+        $latest = $this->request->getGet('latest') === '1';
+        $latest ? $b->orderBy('j.id', 'DESC') : $b->where('j.id >', $after)->orderBy('j.id');
         if ($types !== []) {
             $b->whereIn('j.event', $types);
         }

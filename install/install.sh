@@ -215,10 +215,10 @@ if ! "${SPARK[@]}" mr:project:show system/selftest >/dev/null 2>&1; then
 fi
 if [[ ! -s /etc/mailrunner/selftest.env ]]; then
     tok() { "${SPARK[@]}" mr:token:create "$1" --label="selftest" --json | sed -n '/^{/,$p' | python3 -c 'import sys,json;print(json.load(sys.stdin)["bearer"])'; }
-    umask 027
-    { echo "# Tokens of the self test (install.sh). Never commit."
-      echo "SELFTEST_TOKEN=$(tok system/selftest)"
-      echo "SELFTEST_OTHER_TOKEN=$(tok system/selftest-isolation)"; } > /etc/mailrunner/selftest.env
+    ( umask 027
+      { echo "# Tokens of the self test (install.sh). Never commit."
+        echo "SELFTEST_TOKEN=$(tok system/selftest)"
+        echo "SELFTEST_OTHER_TOKEN=$(tok system/selftest-isolation)"; } > /etc/mailrunner/selftest.env )
     chown root:mailrunner /etc/mailrunner/selftest.env
     chmod 0640 /etc/mailrunner/selftest.env
 fi

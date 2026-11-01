@@ -1,0 +1,14 @@
+[Unit]
+Description=MailRunner Admin: poll node status (spark admin:poll)
+After=mariadb.service
+
+[Service]
+Type=oneshot
+User=mailrunner-admin
+Group=mailrunner-admin
+ExecStart=/usr/bin/php /opt/mailrunner-admin/current/spark admin:poll
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/mailrunner-admin

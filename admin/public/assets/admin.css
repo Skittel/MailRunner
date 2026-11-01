@@ -1,0 +1,9 @@
+/* MailRunner Admin - small additions to Tabler */
+.brand-mark { display: inline-flex; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; border-radius: .5rem;
+  background: var(--tblr-primary); color: #fff; font-weight: 700; font-size: .8rem; margin-right: .5rem; }
+.mail-frame { width: 100%; min-height: 420px; border: 1px solid var(--tblr-border-color); border-radius: var(--tblr-border-radius); background: #fff; }
+.mail-text { white-space: pre-wrap; font-family: var(--tblr-font-monospace); font-size: .85rem; max-height: 60vh; overflow: auto; }
+.htmx-indicator { display: none; }
+.htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display: inline-block; }
+.kv dt { color: var(--tblr-secondary); font-weight: 400; }
+.mono { font-family: var(--tblr-font-monospace); font-size: .85rem; }

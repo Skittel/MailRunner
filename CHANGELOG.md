@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.0 - 2026-11-01
+- **MailRunner Admin** (decision E-19), a separate application in `admin/` with its own database:
+  - CodeIgniter 4, Tabler (Bootstrap 5), htmx.
+  - Sign-in with Entra ID (OpenID Connect, PKCE, ID token checked against the tenant keys). Administrators
+    need the app role `MailRunner.Admin`.
+  - Nodes: register a node, health (reachability, last self test, age), automatic refresh, newest journal
+    events, take over the configuration that already exists on a node.
+  - Customers and projects (desired state in the admin database): pushed to the node on every save.
+    Shows the outcome of the push; API tokens can be created and revoked.
+  - postmaster@/abuse@ mails of all nodes: list, safe display (text; HTML only in a sandboxed iframe without
+    scripts or external content), download of the original. Every read is logged.
+  - Audit log of all admin actions.
+  - `install/install-admin.sh`: database, `/etc/mailrunner-admin/admin.env`, own CA and client certificate
+    for mTLS, release, php-fpm, nginx (once the certificate exists), poll timer (every minute).
+  - Commands `admin:poll`, `admin:node:add`, `admin:node:import`, `admin:project:push`.
+- **Node admin API** `/admin/v1` (mTLS):
+  - nginx verifies client certificates of the admin CA (`install.sh --admin-ca=...`) and answers 403
+    without one.
+  - Endpoints: node status with the full self test, node-wide journal (`latest=1`), customers (PUT),
+    projects (idempotent PUT with routes and settings), tokens, postmaster/abuse mails with their originals.
+  - Uses the same services as the CLI. A project changed by the admin GUI becomes `managed_by=admin`.
+- Node installer: umask of the self test token block scoped to a subshell.
+
 ## 0.0.18 - 2026-11-01
 - postmaster@ and abuse@ (RFC 2142) are accepted for every domain of every enabled project, independent of
   the recipient pattern (decision E-18). Domains that only have address routes get both addresses too.
