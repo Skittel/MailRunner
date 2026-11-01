@@ -1,0 +1,32 @@
+#!/usr/bin/python3 -I
+"""mr-selftest - self test of a receive node (decision E-17), started by `spark mr:selftest`.
+
+  mr-selftest --hostname=<mx name> [--journal-after=<journal id>] [--base-only]
+
+Prints the result as JSON on stdout. Exit code 0 = pass, 1 = at least one check failed, 2 = self test broken.
+"""
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
+
+
+def main():
+    args = dict(a[2:].split("=", 1) if "=" in a else (a[2:], "1") for a in sys.argv[1:] if a.startswith("--"))
+    if not args.get("hostname"):
+        print("usage: mr-selftest --hostname=<mx name> [--journal-after=N] [--base-only]", file=sys.stderr)
+        return 2
+    try:
+        from mailrunner_rx import analyzer, selftest
+        analyzer.use_node_resolver()
+        result = selftest.run_all(args["hostname"], int(args.get("journal-after", "0")), "base-only" in args)
+    except Exception as e:
+        print(json.dumps({"status": "error", "error": f"{e.__class__.__name__}: {e}"}))
+        return 2
+    print(json.dumps(result, ensure_ascii=False))
+    return 0 if result["status"] == "pass" else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

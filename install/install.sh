@@ -40,6 +40,13 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
     python3-requests openssl unbound \
     php-cli php-fpm php-mysql php-intl php-mbstring php-curl php-xml composer mariadb-server nginx rsync >/dev/null
 
+log "Self test level 1 (mail path and analysis without network)"
+# A failing test stops the installation before anything is changed.
+if ! (cd "$SOURCE" && PYTHONDONTWRITEBYTECODE=1 MR_NO_SYSLOG=1 python3 -I -m unittest discover -s mailpath/tests -q 2>&1 | tail -n 3); then
+    echo "ERROR: tests failed, nothing installed" >&2
+    exit 1
+fi
+
 log "System user and directories"
 getent passwd mailrunner >/dev/null || useradd --system --user-group --home-dir /var/lib/mailrunner --shell /usr/sbin/nologin mailrunner
 install -d -o root -g mailrunner -m 0750 /etc/mailrunner /etc/mailrunner/generated
@@ -108,6 +115,11 @@ install -m 0644 "$T/dns/unbound-mailrunner.conf" /etc/unbound/unbound.conf.d/mai
 unbound-checkconf >/dev/null
 systemctl enable --now unbound >/dev/null 2>&1
 systemctl restart unbound
+# local self test zone selftest.test (needs the running resolver to look up the node's addresses)
+PYTHONDONTWRITEBYTECODE=1 python3 -I "$SOURCE/install/gen-selftest-zone.py" "$HOST" /etc/unbound/unbound.conf.d/mailrunner-selftest.conf
+chmod 0644 /etc/unbound/unbound.conf.d/mailrunner-selftest.conf
+unbound-checkconf >/dev/null
+systemctl restart unbound
 install -d /etc/systemd/resolved.conf.d
 install -m 0644 "$T/dns/resolved-mailrunner.conf" /etc/systemd/resolved.conf.d/mailrunner.conf
 systemctl restart systemd-resolved
@@ -171,6 +183,28 @@ ln -sfn /etc/nginx/sites-available/mailrunner-api /etc/nginx/sites-enabled/mailr
 nginx -t 2>/dev/null
 systemctl reload nginx
 
+log "Self test project (configuration only, like any customer)"
+SPARK=(runuser -u mailrunner -- php /opt/mailrunner/current/spark)
+if ! "${SPARK[@]}" mr:project:show system/selftest >/dev/null 2>&1; then
+    "${SPARK[@]}" mr:customer:create system --name="Node system" >/dev/null 2>&1 || true
+    "${SPARK[@]}" mr:project:create system/selftest --profile=analysis --name="Self test" >/dev/null
+    "${SPARK[@]}" mr:project:set system/selftest --recipient-pattern='st-[a-z0-9_-]+' --always-allow=postmaster,abuse \
+        --delete-after-ack-hours=0 --unacked-days=1 --metadata-days=2 >/dev/null
+    "${SPARK[@]}" mr:route:set system/selftest rx.selftest.test >/dev/null
+    "${SPARK[@]}" mr:project:create system/selftest-isolation --profile=analysis --name="Self test: isolation check" >/dev/null
+fi
+if [[ ! -s /etc/mailrunner/selftest.env ]]; then
+    tok() { "${SPARK[@]}" mr:token:create "$1" --label="selftest" --json | sed -n '/^{/,$p' | python3 -c 'import sys,json;print(json.load(sys.stdin)["bearer"])'; }
+    umask 027
+    { echo "# Tokens of the self test (install.sh). Never commit."
+      echo "SELFTEST_TOKEN=$(tok system/selftest)"
+      echo "SELFTEST_OTHER_TOKEN=$(tok system/selftest-isolation)"; } > /etc/mailrunner/selftest.env
+    chown root:mailrunner /etc/mailrunner/selftest.env
+    chmod 0640 /etc/mailrunner/selftest.env
+fi
+php /opt/mailrunner/current/spark mr:apply >/dev/null
+systemctl enable --now mailrunner-selftest.timer >/dev/null 2>&1
+
 log "Old releases"
 KEEP_CUR="$(basename "$(readlink /opt/mailrunner/current)")"
 KEEP_PREV="$(basename "$(readlink /opt/mailrunner/previous 2>/dev/null || echo none)")"
@@ -181,4 +215,7 @@ done
 
 log "Status"
 runuser -u mailrunner -- php /opt/mailrunner/current/spark mr:status || true
+
+log "Self test (result also in the journal: node.selftest)"
+runuser -u mailrunner -- php /opt/mailrunner/current/spark mr:selftest | tail -n 1 || true
 echo "Installed $VERSION as $REL. CLI: sudo mailrunner mr:..."

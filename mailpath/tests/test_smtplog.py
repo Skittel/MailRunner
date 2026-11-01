@@ -134,3 +134,40 @@ class TrackerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SelftestHelpersTest(unittest.TestCase):
+    def test_own_address_skips_quota_apis(self):
+        from unittest import mock
+        from mailrunner_rx import analyzer
+        with mock.patch.object(analyzer, "node_addresses", return_value=frozenset({"192.0.2.10", "2001:db8::10"})):
+            self.assertTrue(analyzer.is_own_address("192.0.2.10"))
+            self.assertTrue(analyzer.is_own_address("2001:0db8::10"))
+            self.assertFalse(analyzer.is_own_address("198.51.100.1"))
+            self.assertFalse(analyzer.is_own_address("not-an-ip"))
+
+    def test_scenario_expectations(self):
+        from mailrunner_rx import selftest
+        run = selftest.Run("node.example.net")
+        items, subject = selftest.scenarios(run)
+        self.assertIn(run.run_id, subject)
+        self.assertEqual({"pass4", "pass6", "dkim_tampered", "spf_fail", "no_tls", "null_sender", "outlook_to"}, set(items))
+        self.assertEqual("", items["null_sender"]["mail_from"])
+        self.assertTrue(items["pass4"]["raw"].startswith(b"DKIM-Signature:"))
+        good = {"spf": {"result": "pass"}, "dkim": {"result": "pass"}, "dmarc": {"result": "pass"},
+                "smtp": {"tls": {"status": "pass"}, "ip_version": 4}}
+        self.assertEqual([], items["pass4"]["expect"](good, {}))
+        bad = dict(good, dkim={"result": "fail"})
+        self.assertEqual(["debug.dkim.result='fail' expected 'pass'"], items["pass4"]["expect"](bad, {}))
+        to = items["outlook_to"]["rcpt"]
+        self.assertEqual([], items["outlook_to"]["expect"]({"header": {"to": [{"address": to, "display_name_is_address": True}]}}, {}))
+
+    def test_result_status(self):
+        from mailrunner_rx import selftest
+        run = selftest.Run("node.example.net")
+        run.add("base", "base.a", "ok")
+        run.add("base", "base.b", "warn")
+        self.assertEqual("pass", run.result()["status"])
+        run.check("base", "base.c", lambda: 1 / 0)
+        r = run.result()
+        self.assertEqual(("fail", ["base.c"], ["base.b"]), (r["status"], r["failed"], r["warnings"]))

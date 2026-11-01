@@ -1,0 +1,11 @@
+[Unit]
+Description=MailRunner: node self test every hour
+
+[Timer]
+OnBootSec=10min
+OnCalendar=hourly
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

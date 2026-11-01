@@ -6,6 +6,7 @@ use App\Controllers\BaseController;
 use App\Core\Api\ApiResponse;
 use App\Core\Auth\CurrentToken;
 use App\Core\Support\Time;
+use App\Core\Node\SelfTest;
 use App\Modules\Receive\Libraries\SmtpSessionImporter;
 
 /**
@@ -15,7 +16,8 @@ use App\Modules\Receive\Libraries\SmtpSessionImporter;
  *   own          nothing else
  *   connections  smtp.connection without project (SMTP sessions without MAIL FROM)
  *   unassigned   all smtp.* events without project
- * Every event carries "scope": "project" or "unassigned".
+ * Node events (node.selftest) are visible to every project.
+ * Every event carries "scope": "project", "unassigned" or "node".
  */
 class Journal extends BaseController
 {
@@ -42,9 +44,8 @@ class Journal extends BaseController
             ->select('id, created_at, event, project_id, details')
             ->where('id >', $after)
             ->groupStart()->where('project_id', $projectId);
-        if ($unassigned !== []) {
-            $builder->orGroupStart()->where('project_id', null)->whereIn('event', $unassigned)->groupEnd();
-        }
+        $visible = array_merge($unassigned, [SelfTest::EVENT]);
+        $builder->orGroupStart()->where('project_id', null)->whereIn('event', $visible)->groupEnd();
         $builder->groupEnd();
         if ($types !== []) {
             $builder->whereIn('event', $types);
@@ -55,7 +56,7 @@ class Journal extends BaseController
             'id'         => (int) $r['id'],
             'created_at' => Time::toIso($r['created_at']),
             'event'      => $r['event'],
-            'scope'      => $r['project_id'] === null ? 'unassigned' : 'project',
+            'scope'      => $r['project_id'] !== null ? 'project' : ($r['event'] === SelfTest::EVENT ? 'node' : 'unassigned'),
             'details'    => $r['details'] === null ? null : json_decode($r['details'], true),
         ], $rows);
 

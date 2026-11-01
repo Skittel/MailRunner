@@ -98,6 +98,40 @@ def ipregistry_cached(ip, api_key):
     return result
 
 
+_OWN = {"at": 0.0, "addresses": frozenset()}
+
+
+def node_addresses(ttl=300):
+    """IP addresses of this node (all interfaces), refreshed every ttl seconds."""
+    import ipaddress
+    import json as _json
+    import subprocess
+    now = time.monotonic()
+    if now - _OWN["at"] >= ttl:
+        found = set()
+        try:
+            out = subprocess.run(["ip", "-j", "addr", "show"], capture_output=True, text=True, timeout=5).stdout
+            for iface in _json.loads(out or "[]"):
+                for a in iface.get("addr_info", []):
+                    found.add(str(ipaddress.ip_address(a["local"])))
+        except Exception:
+            pass
+        _OWN.update(at=now, addresses=frozenset(found))
+    return _OWN["addresses"]
+
+
+def is_own_address(ip):
+    """Mail from the node itself (self test, local tools) uses no external API quota."""
+    import ipaddress
+    try:
+        return str(ipaddress.ip_address(ip)) in node_addresses()
+    except ValueError:
+        return False
+
+
+SKIPPED_OWN = {"status": "skipped", "reason": "node's own address"}
+
+
 def use_node_resolver(address=None):
     """All lookups of the analysis go to the local unbound: normal queries and the DNSSEC (AD bit) ones."""
     address = address or config.RESOLVER
@@ -120,11 +154,13 @@ def analyze(raw, envelope, creds, mail_id, timeout):
             client = CachingDNSClient()
             result = smf_analysis.analyze(raw, envelope, client, {"spamhaus_dqs_key": creds.get("SPAMHAUS_DQS_KEY")})
             mark_cached_dnsbl(result["debug"], client)
+            own = is_own_address(envelope["client_ip"])
             if creds.get("BLM_USER") and creds.get("BLM_PASS"):
-                result["debug"]["blacklistmaster"] = blacklistmaster_cached(
+                result["debug"]["blacklistmaster"] = dict(SKIPPED_OWN) if own else blacklistmaster_cached(
                     envelope["client_ip"], mail_id, creds["BLM_USER"], creds["BLM_PASS"])
             if creds.get("IPREGISTRYIO_TOKEN"):
-                result["debug"]["ipregistry"] = ipregistry_cached(envelope["client_ip"], creds["IPREGISTRYIO_TOKEN"])
+                result["debug"]["ipregistry"] = dict(SKIPPED_OWN) if own else ipregistry_cached(
+                    envelope["client_ip"], creds["IPREGISTRYIO_TOKEN"])
             box["result"] = result
         except Exception as e:  # reported to the caller
             box["error"] = e

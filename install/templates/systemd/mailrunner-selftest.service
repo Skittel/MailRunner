@@ -1,0 +1,17 @@
+[Unit]
+Description=MailRunner: node self test (spark mr:selftest), result in the journal
+After=mariadb.service postfix.service mailrunner-milter.service
+
+[Service]
+Type=oneshot
+User=mailrunner
+Group=mailrunner
+ExecStart=/usr/bin/php /opt/mailrunner/current/spark mr:selftest
+# exit 1 = a check failed (recorded in the journal), not a unit failure
+SuccessExitStatus=1
+TimeoutStartSec=10min
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/mailrunner
