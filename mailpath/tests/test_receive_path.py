@@ -177,6 +177,36 @@ class CacheTest(unittest.TestCase):
         self.assertEqual(3, check.call_count, "first IP once, error for second IP twice")
 
 
+class IpregistryTest(unittest.TestCase):
+    def test_parse_picks_wanted_fields(self):
+        from mailrunner_rx import ipregistry
+        data = {"ip": "2a01:111:f403:c20c::1", "type": "IPv6",
+                "connection": {"asn": 8075, "organization": "Microsoft Corporation", "domain": "microsoft.com", "route": "2a01:111::/32", "type": "business"},
+                "location": {"country": {"code": "DE", "name": "Germany"}, "city": "Frankfurt am Main", "continent": {"code": "EU", "name": "Europe"}},
+                "carrier": {"name": None}, "security": {"is_threat": False}}
+        r = ipregistry.parse(data)
+        self.assertEqual((8075, "Microsoft Corporation", "DE", "Frankfurt am Main", "EU", None, False),
+                         (r["asn"], r["as_organization"], r["country_code"], r["city"], r["continent_code"], r["carrier_name"], r["is_threat"]))
+
+    def test_private_skipped_and_errors_never_contain_key(self):
+        from mailrunner_rx import ipregistry
+        self.assertEqual("skipped", ipregistry.lookup("192.168.1.1", "SECRETKEY")["status"])
+        with mock.patch("requests.get", side_effect=RuntimeError("https://api.ipregistry.co/1.1.1.1?key=SECRETKEY")):
+            r = ipregistry.lookup("1.1.1.1", "SECRETKEY")
+        self.assertEqual({"status": "error", "error": "RuntimeError"}, r)
+
+    def test_ipregistry_cached_only_ok(self):
+        from mailrunner_rx import analyzer
+        analyzer.IPREGISTRY_CACHE = analyzer.TTLCache(3600)
+        answers = iter([{"status": "ok", "asn": 1}, {"status": "error", "error": "TOO_MANY_REQUESTS"}, {"status": "ok", "asn": 2}])
+        with mock.patch.object(analyzer.ipregistry, "lookup", side_effect=lambda *a: next(answers)) as lookup:
+            self.assertEqual(1, analyzer.ipregistry_cached("1.1.1.1", "k")["asn"])
+            self.assertTrue(analyzer.ipregistry_cached("1.1.1.1", "k")["cached"])
+            self.assertEqual("error", analyzer.ipregistry_cached("8.8.8.8", "k")["status"])
+            self.assertEqual(2, analyzer.ipregistry_cached("8.8.8.8", "k")["asn"])
+        self.assertEqual(3, lookup.call_count)
+
+
 def load_milter_module():
     path = os.path.join(ROOT, "mailpath", "receive", "bin", "mr-milter")
     loader = importlib.machinery.SourceFileLoader("mr_milter", path)

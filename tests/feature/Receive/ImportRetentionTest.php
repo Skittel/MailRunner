@@ -58,7 +58,9 @@ final class ImportRetentionTest extends CIUnitTestCase
             'attachments' => [['name' => 'rechnung.pdf', 'size' => 9, 'content_type' => 'application/pdf', 'disposition' => 'attachment']],
             'header_from' => 'Jörg <joerg@example.net>', 'header_to' => 'test0001@test.smartmailflow.email', 'subject' => 'Hallo',
             'date_hdr' => 'Sun, 01 Nov 2026 16:00:00 +0000', 'message_id_hdr' => '<x@example.net>', 'spf_status' => 'pass',
-            'dkim_status' => 'none', 'analysis_status' => 'ok', 'analysis_ms' => 2700, 'analysis_path' => $analysisPath, 'raw_path' => null,
+            'dkim_status' => 'none', 'analysis_status' => 'ok',
+            'client_info' => ['asn' => 8075, 'as_organization' => 'Microsoft Corporation', 'country_code' => 'DE', 'city' => 'Frankfurt am Main',
+                'continent_code' => 'EU', 'carrier_name' => null, 'is_threat' => false], 'analysis_ms' => 2700, 'analysis_path' => $analysisPath, 'raw_path' => null,
         ];
         file_put_contents($this->dir . '/spool/analyzed/' . $id . '.json', $this->crypto->encryptJson($meta, 'spool:' . $id . ':analyzed'));
     }
@@ -78,6 +80,10 @@ final class ImportRetentionTest extends CIUnitTestCase
         $this->assertSame('rechnung.pdf', json_decode($row['attachments'], true)[0]['name']);
         $this->assertNull($row['raw_path']);
         $this->assertSame('analyzed', $row['status']);
+        $this->assertSame('8075', (string) $row['client_asn']);
+        $this->assertSame('DE', $row['client_country']);
+        $this->assertSame('0', (string) $row['client_is_threat']);
+        $this->assertNull($row['client_carrier']);
 
         $files = new MessageStore($this->dir . '/store', $this->crypto);
         $this->assertSame('test0001', $files->analysis($row['spool_id'], $row['analysis_path'])['record']['mail_id']);

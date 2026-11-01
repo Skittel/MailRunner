@@ -1,15 +1,15 @@
 """Runs the vendored SmartMailFlow analysis with the node resolver (unbound, TTL cache shared by
 all messages) and optional blacklistmaster check, within a time limit.
 
-Spamhaus answers (TTL 1 s) and blacklistmaster results are additionally kept for 1 hour in
-memory (decision 01.11.26); cached entries are marked with "cached": true and "cached_at".
+Spamhaus answers (TTL 1 s), blacklistmaster and ipregistry results are additionally kept for
+1 hour in memory (decision 01.11.26); cached entries are marked with "cached": true and "cached_at".
 """
 import os
 import sys
 import threading
 import time
 
-from . import blacklistmaster, config
+from . import blacklistmaster, config, ipregistry
 from .cache import TTLCache
 
 _VENDOR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "vendor", "smartmailflow")
@@ -25,12 +25,14 @@ SPAMHAUS_SUFFIXES = (".spamhaus.net", ".spamhaus.org")
 DEFAULT_CACHE_SECONDS = 3600
 SPAMHAUS_CACHE = TTLCache(DEFAULT_CACHE_SECONDS)
 BLM_CACHE = TTLCache(DEFAULT_CACHE_SECONDS)
+IPREGISTRY_CACHE = TTLCache(DEFAULT_CACHE_SECONDS)
 CACHEABLE_DNS_ERRORS = (None, "nxdomain", "nodata")   # listed / not listed; never timeouts or failures
 
 
 def configure_caches(creds):
-    """Lifetimes from secrets.env (SPAMHAUS_CACHE_SECONDS, BLM_CACHE_SECONDS), default 3600."""
-    for cache, name in ((SPAMHAUS_CACHE, "SPAMHAUS_CACHE_SECONDS"), (BLM_CACHE, "BLM_CACHE_SECONDS")):
+    """Lifetimes from secrets.env (SPAMHAUS_CACHE_SECONDS, BLM_CACHE_SECONDS, IPREGISTRYIO_CACHE_SECONDS), default 3600."""
+    for cache, name in ((SPAMHAUS_CACHE, "SPAMHAUS_CACHE_SECONDS"), (BLM_CACHE, "BLM_CACHE_SECONDS"),
+                        (IPREGISTRY_CACHE, "IPREGISTRYIO_CACHE_SECONDS")):
         try:
             cache.ttl = int(creds.get(name, DEFAULT_CACHE_SECONDS))
         except ValueError:
@@ -86,6 +88,16 @@ def blacklistmaster_cached(ip, mail_id, user, password):
     return result
 
 
+def ipregistry_cached(ip, api_key):
+    hit = IPREGISTRY_CACHE.get(ip)
+    if hit is not None:
+        return dict(hit[0], cached=True, cached_at=iso(hit[1]))
+    result = ipregistry.lookup(ip, api_key)
+    if result.get("status") == "ok":
+        IPREGISTRY_CACHE.put(ip, result)
+    return result
+
+
 def use_node_resolver(address=None):
     """All lookups of the analysis go to the local unbound: normal queries and the DNSSEC (AD bit) ones."""
     address = address or config.RESOLVER
@@ -111,6 +123,8 @@ def analyze(raw, envelope, creds, mail_id, timeout):
             if creds.get("BLM_USER") and creds.get("BLM_PASS"):
                 result["debug"]["blacklistmaster"] = blacklistmaster_cached(
                     envelope["client_ip"], mail_id, creds["BLM_USER"], creds["BLM_PASS"])
+            if creds.get("IPREGISTRY_API_KEY"):
+                result["debug"]["ipregistry"] = ipregistry_cached(envelope["client_ip"], creds["IPREGISTRY_API_KEY"])
             box["result"] = result
         except Exception as e:  # reported to the caller
             box["error"] = e

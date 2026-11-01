@@ -21,6 +21,7 @@ use App\Modules\Receive\Libraries\MessageStore;
 class Messages extends BaseController
 {
     private const LIST_FIELDS = 'id, message_id, spool_id, profile, status, received_at, queue_id, mail_from, rcpt, client_ip, helo,
+        client_asn, client_as_org, client_country, client_city, client_continent, client_carrier, client_is_threat,
         header_from, header_to, subject, date_hdr, attachments, spf_status, dkim_status, analysis_status, analysis_ms,
         analysis_path, raw_path, size, sha256, acked_at, content_deleted_at, delete_reason';
 
@@ -139,6 +140,15 @@ class Messages extends BaseController
                 'client_ip' => $row['client_ip'],
                 'helo'      => $row['helo'],
                 'queue_id'  => $row['queue_id'],
+                'client'    => [
+                    'asn'             => $row['client_asn'] === null ? null : (int) $row['client_asn'],
+                    'as_organization' => $row['client_as_org'],
+                    'country'         => $row['client_country'],
+                    'city'            => $row['client_city'],
+                    'continent'       => $row['client_continent'],
+                    'carrier'         => $row['client_carrier'],
+                    'is_threat'       => $row['client_is_threat'] === null ? null : (bool) $row['client_is_threat'],
+                ],
             ],
             'header'             => [
                 'from'    => $row['header_from'],

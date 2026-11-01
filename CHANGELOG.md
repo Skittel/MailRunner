@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.9 - 2026-11-01
+- ipregistry.co lookup of the client IP (`IPREGISTRY_API_KEY` in `secrets.env`): AS number, organization,
+  domain, route and type, country, city, continent, carrier, `security.is_threat`. Result in
+  `debug.ipregistry`; cached 1 hour per IP (`IPREGISTRYIO_CACHE_SECONDS`), only successful answers.
+  Loopback/private addresses are not sent; errors never contain the API key.
+- Database and API (`envelope.client`): `client_asn`, `client_as_org`, `client_country`, `client_city`,
+  `client_continent`, `client_carrier`, `client_is_threat`.
+
 ## 0.0.8 - 2026-11-01
 - Spamhaus answers (Spamhaus TTL is 1 s) and blacklistmaster results are kept for 1 hour in the milter
   (in memory, shared by all messages). Only real answers are cached (listed / not listed), never timeouts

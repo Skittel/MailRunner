@@ -56,6 +56,13 @@ def localpart(addr):
     return addr.split("@")[0] if "@" in addr else ""
 
 
+def client_info(ipreg):
+    """Client IP facts for the database (from ipregistry), or None."""
+    if not ipreg or ipreg.get("status") != "ok":
+        return None
+    return {k: ipreg.get(k) for k in ("asn", "as_organization", "country_code", "city", "continent_code", "carrier_name", "is_threat")}
+
+
 def strip_brackets(addr):
     return (addr or "").strip().lstrip("<").rstrip(">")
 
@@ -189,6 +196,7 @@ class ReceiveMilter(Milter.Base):
                 "size": len(raw), "sha256": sha256, "attachments": attachments, **summary,
                 "spf_status": record["spf_status"], "dkim_status": record["dkim_status"],
                 "analysis_status": analysis_status,
+                "client_info": client_info((result.get("debug") or {}).get("ipregistry")),
                 "analysis_ms": round((time.monotonic() - started) * 1000),
             }
             keep_raw = route["profile"] != "analysis"   # E-12: profile analysis keeps no raw mail

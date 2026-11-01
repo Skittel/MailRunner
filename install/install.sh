@@ -92,9 +92,13 @@ SPAMHAUS_DQS_KEY=
 BLM_USER=
 BLM_PASS=
 
-# Cache lifetimes in seconds for Spamhaus answers and blacklistmaster results (default 3600)
+# ipregistry.co API key (AS, country, city, continent, carrier, threat of the client IP)
+IPREGISTRY_API_KEY=
+
+# Cache lifetimes in seconds (default 3600)
 SPAMHAUS_CACHE_SECONDS=3600
 BLM_CACHE_SECONDS=3600
+IPREGISTRYIO_CACHE_SECONDS=3600
 SECRETS
 fi
 
