@@ -12,7 +12,8 @@ use CodeIgniter\Database\BaseConnection;
 use Throwable;
 
 /**
- * Imports analysed spool entries (spool/analyzed/) into receive_messages.
+ * Imports the metadata hand-off of mr-milter (spool/analyzed/<id>.json) into receive_messages.
+ * Mail and analysis stay as encrypted files in store/ (see MessageStore).
  *
  * One transaction per message (row + journal event "receive.received"); spool files are
  * removed only after commit. Re-running is safe: spool_id is unique.
@@ -77,30 +78,39 @@ class Importer
                 ?? throw new \RuntimeException('Project #' . $meta['project_id'] . ' no longer exists');
 
             $messageId = RandomId::publicId(self::MESSAGE_PREFIX);
-            $data      = [
-                'record'      => self::record($meta),
-                'debug'       => $meta['analysis']['debug'] ?? null,
-                'raw_headers' => $meta['analysis']['raw_headers'] ?? null,
-            ];
+            $status    = $meta['profile'] === 'analysis' ? 'analyzed' : 'pending';
             $this->db->table('receive_messages')->insert([
-                'message_id'  => $messageId,
-                'project_id'  => $project['id'],
-                'spool_id'    => $spoolId,
-                'profile'     => $meta['profile'],
-                'status'      => $meta['profile'] === 'analysis' ? 'analyzed' : 'pending',
-                'received_at' => (new \DateTimeImmutable($meta['received_at']))->format(Time::DB_FORMAT),
-                'imported_at' => Time::now(),
-                'queue_id'    => mb_substr((string) $meta['queue_id'], 0, 32),
-                'mail_from'   => mb_substr((string) $meta['mail_from'], 0, 320),
-                'rcpt'        => mb_substr((string) $meta['rcpt'], 0, 320),
-                'client_ip'   => mb_substr((string) $meta['client_ip'], 0, 45),
-                'size'        => (int) $meta['size'],
-                'sha256'      => (string) $meta['sha256'],
-                'raw_stored'  => 0,
-                'data_enc'    => $this->crypto->encryptJson($data, 'db:receive_messages:' . $messageId),
+                'message_id'      => $messageId,
+                'project_id'      => $project['id'],
+                'spool_id'        => $spoolId,
+                'profile'         => $meta['profile'],
+                'status'          => $status,
+                'received_at'     => (new \DateTimeImmutable($meta['received_at']))->format(Time::DB_FORMAT),
+                'imported_at'     => Time::now(),
+                'queue_id'        => self::cut($meta['queue_id'] ?? '', 32),
+                'mail_from'       => self::cut($meta['mail_from'] ?? '', 320),
+                'rcpt'            => self::cut($meta['rcpt'] ?? '', 320),
+                'client_ip'       => self::cut($meta['client_ip'] ?? '', 45),
+                'helo'            => self::cut($meta['helo'] ?? '', 255),
+                'client_name'     => self::cut($meta['client_name'] ?? '', 255),
+                'header_from'     => self::cutOrNull($meta['header_from'] ?? null, 998),
+                'header_to'       => self::cutOrNull($meta['header_to'] ?? null, 65000),
+                'subject'         => self::cutOrNull($meta['subject'] ?? null, 998),
+                'date_hdr'        => self::cutOrNull($meta['date_hdr'] ?? null, 255),
+                'message_id_hdr'  => self::cutOrNull($meta['message_id_hdr'] ?? null, 998),
+                'attachments'     => json_encode($meta['attachments'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'spf_status'      => self::cutOrNull($meta['spf_status'] ?? null, 16),
+                'dkim_status'     => self::cutOrNull($meta['dkim_status'] ?? null, 16),
+                'analysis_status' => ($meta['analysis_status'] ?? 'ok') === 'timeout' ? 'timeout' : 'ok',
+                'analysis_ms'     => isset($meta['analysis_ms']) ? (int) $meta['analysis_ms'] : null,
+                'analysis_path'   => $meta['analysis_path'] ?? null,
+                'raw_path'        => $meta['raw_path'] ?? null,
+                'size'            => (int) $meta['size'],
+                'sha256'          => (string) $meta['sha256'],
             ]);
             $this->journal->append('receive.received', new ChangeContext('system', 'mr:import'), (int) $project['customer_id'], (int) $project['id'], [
-                'message_id' => $messageId, 'status' => $meta['profile'] === 'analysis' ? 'analyzed' : 'pending', 'profile' => $meta['profile'],
+                'message_id' => $messageId, 'status' => $status, 'profile' => $meta['profile'],
+                'analysis' => $meta['analysis_status'] ?? 'ok',
             ]);
 
             return true;
@@ -112,30 +122,14 @@ class Importer
         return $imported;
     }
 
-    /**
-     * Header data as in SmartMailFlow's "emails" row (without raw).
-     *
-     * @param array<string, mixed> $meta
-     *
-     * @return array<string, mixed>
-     */
-    public static function record(array $meta): array
+    private static function cut(?string $value, int $length): string
     {
-        $a = $meta['analysis'] ?? [];
+        return mb_substr((string) $value, 0, $length);
+    }
 
-        return [
-            'queue_id'       => $a['queue_id'] ?? $meta['queue_id'],
-            'smtp_mail_from' => $a['smtp_mail_from'] ?? $meta['mail_from'],
-            'smtp_rcpt_to'   => $a['smtp_rcpt_to'] ?? $meta['rcpt'],
-            'header_from'    => $a['header_from'] ?? null,
-            'header_to'      => $a['header_to'] ?? null,
-            'subject'        => $a['subject'] ?? null,
-            'date_hdr'       => $a['date_hdr'] ?? null,
-            'spf_status'     => $a['spf_status'] ?? null,
-            'dkim_status'    => $a['dkim_status'] ?? null,
-            'mail_id'        => $a['mail_id'] ?? null,
-            'created'        => $meta['received_at'],
-        ];
+    private static function cutOrNull(?string $value, int $length): ?string
+    {
+        return $value === null ? null : mb_substr($value, 0, $length);
     }
 
     private function fail(string $spoolId, Throwable $e): void

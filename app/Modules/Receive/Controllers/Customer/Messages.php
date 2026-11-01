@@ -5,21 +5,24 @@ namespace App\Modules\Receive\Controllers\Customer;
 use App\Controllers\BaseController;
 use App\Core\Api\ApiResponse;
 use App\Core\Auth\CurrentToken;
-use App\Core\Secrets\NodeCrypto;
 use App\Core\Support\ChangeContext;
 use App\Core\Support\Time;
 use App\Core\Support\Transaction;
+use App\Modules\Receive\Libraries\MessageStore;
 
 /**
  * Received messages of the token's project.
  *
  * GET  /v1/messages?after_id=&limit=&acked=0|1  list (metadata only)
  * GET  /v1/messages/{message_id}                metadata + record (header data) + debug (analysis JSON) + raw_headers
+ * GET  /v1/messages/{message_id}/raw            original mail (message/rfc822), only if kept (not for profile analysis)
  * POST /v1/messages/ack {"message_ids":[...]}   confirm collection (idempotent)
  */
 class Messages extends BaseController
 {
-    private const LIST_FIELDS = 'id, message_id, profile, status, received_at, queue_id, mail_from, rcpt, client_ip, size, sha256, acked_at, content_deleted_at, delete_reason';
+    private const LIST_FIELDS = 'id, message_id, spool_id, profile, status, received_at, queue_id, mail_from, rcpt, client_ip, helo,
+        header_from, header_to, subject, date_hdr, attachments, spf_status, dkim_status, analysis_status, analysis_ms,
+        analysis_path, raw_path, size, sha256, acked_at, content_deleted_at, delete_reason';
 
     public function index()
     {
@@ -45,21 +48,43 @@ class Messages extends BaseController
 
     public function show(string $messageId)
     {
-        $row = db_connect()->table('receive_messages')->select(self::LIST_FIELDS . ', data_enc')
-            ->where('project_id', CurrentToken::projectId())->where('message_id', $messageId)
-            ->get()->getRowArray();
+        $row = $this->find($messageId);
         if ($row === null) {
             return ApiResponse::error(404, 'MESSAGE_NOT_FOUND', 'Message not found');
         }
-        $data = $row['data_enc'] === null ? null
-            : NodeCrypto::forNode()->decryptJson($row['data_enc'], 'db:receive_messages:' . $row['message_id']);
-        unset($row['data_enc']);
+        $analysis = $row['analysis_path'] === null ? null : MessageStore::forNode()->analysis($row['spool_id'], $row['analysis_path']);
 
         return ApiResponse::ok(['data' => array_diff_key(self::present($row), ['cursor' => 1]) + [
-            'record'      => $data['record'] ?? null,
-            'debug'       => $data['debug'] ?? null,
-            'raw_headers' => $data['raw_headers'] ?? null,
+            'record'      => $analysis['record'] ?? null,
+            'debug'       => $analysis['debug'] ?? null,
+            'raw_headers' => $analysis['raw_headers'] ?? null,
         ]]);
+    }
+
+    public function raw(string $messageId)
+    {
+        $row = $this->find($messageId);
+        if ($row === null) {
+            return ApiResponse::error(404, 'MESSAGE_NOT_FOUND', 'Message not found');
+        }
+        if ($row['raw_path'] === null) {
+            return ApiResponse::error(404, 'RAW_NOT_AVAILABLE', 'The original mail is not kept for this message');
+        }
+
+        return $this->response->setStatusCode(200)
+            ->setHeader('Cache-Control', 'no-store')
+            ->setContentType('message/rfc822')
+            ->setBody(MessageStore::forNode()->raw($row['spool_id'], $row['raw_path']));
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function find(string $messageId): ?array
+    {
+        return db_connect()->table('receive_messages')->select(self::LIST_FIELDS)
+            ->where('project_id', CurrentToken::projectId())->where('message_id', $messageId)
+            ->get()->getRowArray();
     }
 
     public function ack()
@@ -108,10 +133,25 @@ class Messages extends BaseController
             'profile'            => $row['profile'],
             'status'             => $row['status'],
             'received_at'        => Time::toIso($row['received_at']),
-            'queue_id'           => $row['queue_id'],
-            'mail_from'          => $row['mail_from'],
-            'rcpt'               => $row['rcpt'],
-            'client_ip'          => $row['client_ip'],
+            'envelope'           => [
+                'mail_from' => $row['mail_from'],
+                'rcpt'      => $row['rcpt'],
+                'client_ip' => $row['client_ip'],
+                'helo'      => $row['helo'],
+                'queue_id'  => $row['queue_id'],
+            ],
+            'header'             => [
+                'from'    => $row['header_from'],
+                'to'      => $row['header_to'],
+                'subject' => $row['subject'],
+                'date'    => $row['date_hdr'],
+            ],
+            'attachments'        => $row['attachments'] === null ? [] : json_decode($row['attachments'], true),
+            'spf_status'         => $row['spf_status'],
+            'dkim_status'        => $row['dkim_status'],
+            'analysis_status'    => $row['analysis_status'],
+            'analysis_ms'        => $row['analysis_ms'] === null ? null : (int) $row['analysis_ms'],
+            'raw_available'      => $row['raw_path'] !== null,
             'size'               => (int) $row['size'],
             'sha256'             => $row['sha256'],
             'acked_at'           => Time::toIso($row['acked_at']),

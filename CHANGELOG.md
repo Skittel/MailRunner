@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.0.7 - 2026-11-01
+- Receive decisions before the 250 (decision E-11): new `mr-milter` (Python, pymilter) replaces the pipe
+  (`mr-deliver`, `mr-analyze`). At end of data it stores the message, runs the analysis for every message and
+  only then answers 250 (milter DISCARD: Postfix drops its queue copy) or 451. Time limit 90 s: profile
+  `analysis` is kept with `analysis_status = timeout`, other profiles get 451. Milter unavailable = 451.
+- Per message id two encrypted files in `store/YYYY/MM/DD/`: `<id>.analysis.json.enc` (always) and
+  `<id>.eml.enc` (not for profile `analysis`, decision E-12).
+- Database keeps envelope, From, To, Subject, Date, Message-ID, attachments (name, size, type), SPF/DKIM status
+  and analysis duration; the encrypted analysis blob in the database is gone.
+- Raw message rebuilt byte-exactly from milter callbacks (`P_HDR_LEADSPC`); own Received header in Postfix
+  format (Postfix does not pass its own to milters).
+- One project per SMTP transaction (further recipients get 452 4.5.3 and are sent again by the client).
+- Node resolver: unbound (recursive, DNSSEC, TTL cache shared by all analyses); systemd-resolved forwards to it
+  without caching. `mr:dns:flush [<domain>]` empties the cache.
+- API: `GET /v1/messages/{id}` returns envelope, header, attachments; `GET /v1/messages/{id}/raw` (if kept).
+- blacklistmaster is not asked for loopback/private client addresses.
+
 ## 0.0.6 - 2026-11-01
 - Analysis credentials are node-wide now: `/etc/mailrunner/secrets.env` (`SPAMHAUS_DQS_KEY`, `BLM_USER`,
   `BLM_PASS`, same names as SmartMailFlow). `install.sh` creates an empty template.

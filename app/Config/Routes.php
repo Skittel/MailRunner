@@ -17,6 +17,7 @@ $routes->group('v1', ['filter' => 'bearer'], static function (RouteCollection $r
         $routes->get('journal', '\App\Modules\Receive\Controllers\Customer\Journal::index');
         $routes->get('messages', '\App\Modules\Receive\Controllers\Customer\Messages::index');
         $routes->post('messages/ack', '\App\Modules\Receive\Controllers\Customer\Messages::ack');
+        $routes->get('messages/(:segment)/raw', '\App\Modules\Receive\Controllers\Customer\Messages::raw/$1');
         $routes->get('messages/(:segment)', '\App\Modules\Receive\Controllers\Customer\Messages::show/$1');
     }
 });

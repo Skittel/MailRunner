@@ -10,14 +10,18 @@ use CodeIgniter\Database\BaseConnection;
 
 /**
  * Deletion periods per project:
+ * Content = the encrypted files in store/ (analysis, raw mail if kept).
  * - content N hours after ack (delete_after_ack_hours)  -> event receive.deleted (ack_retention)
  * - content of unacknowledged messages after N days     -> event receive.expired
  * - metadata rows after N days (metadata_days); the journal keeps its own period.
  */
 class Retention
 {
-    public function __construct(private readonly BaseConnection $db, private readonly JournalWriter $journal)
-    {
+    public function __construct(
+        private readonly BaseConnection $db,
+        private readonly JournalWriter $journal,
+        private readonly ?MessageStore $files = null,
+    ) {
     }
 
     /**
@@ -50,19 +54,22 @@ class Retention
     private function clearContent(array $project, string $where, array $bind, string $reason, string $event): int
     {
         $rows = $this->db->query(
-            'SELECT id, message_id FROM receive_messages WHERE project_id = ? AND content_deleted_at IS NULL AND ' . $where . ' LIMIT 1000',
+            'SELECT id, message_id, analysis_path, raw_path FROM receive_messages WHERE project_id = ? AND content_deleted_at IS NULL AND ' . $where . ' LIMIT 1000',
             [$project['id'], ...$bind],
         )->getResultArray();
 
         foreach ($rows as $row) {
             Transaction::run($this->db, function () use ($row, $project, $reason, $event): void {
                 $this->db->table('receive_messages')->where('id', $row['id'])->update([
-                    'data_enc' => null, 'content_deleted_at' => Time::now(), 'delete_reason' => $reason,
+                    'analysis_path' => null, 'raw_path' => null, 'content_deleted_at' => Time::now(), 'delete_reason' => $reason,
                 ]);
                 $this->journal->append($event, new ChangeContext('system', 'mr:maintenance'), (int) $project['customer_id'], (int) $project['id'], [
                     'message_id' => $row['message_id'], 'reason' => $reason,
                 ]);
             });
+            // files after commit: a crash leaves at most an orphan file, never a row pointing to nothing
+            $this->files?->delete($row['analysis_path']);
+            $this->files?->delete($row['raw_path']);
         }
 
         return count($rows);

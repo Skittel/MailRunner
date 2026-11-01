@@ -1,0 +1,21 @@
+[Unit]
+Description=MailRunner: receive milter (store, analyse, decide before 250)
+After=network-online.target unbound.service
+Wants=network-online.target
+Before=postfix.service
+
+[Service]
+Type=simple
+User=mailrunner
+Group=mailrunner
+ExecStart=/opt/mailrunner/current/mailpath/receive/bin/mr-milter
+Restart=always
+RestartSec=2
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/mailrunner/receive
+
+[Install]
+WantedBy=multi-user.target

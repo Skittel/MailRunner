@@ -1,0 +1,210 @@
+#!/usr/bin/python3 -I
+"""mr-milter - receive role: decides during the SMTP session (decision E-11).
+
+At end of data the milter stores the message encrypted, runs the analysis for every message
+(SmartMailFlow library, node resolver with shared TTL cache) and answers only then:
+  250  message kept  (milter DISCARD: Postfix confirms and drops its own queue copy)
+  451  temporary problem or analysis over the time limit (profiles checked/checked_auth)
+Profile "analysis" keeps no raw mail: only the analysis file and the database metadata.
+
+Runs as systemd service mailrunner-milter (user mailrunner). Postfix: smtpd_milters, milter_default_action = tempfail.
+"""
+import email
+import hashlib
+import os
+import socket
+import sys
+import syslog
+import time
+from email.utils import parseaddr
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
+
+import Milter  # noqa: E402
+
+from mailrunner_rx import analyzer, config, crypto, message, secrets, store  # noqa: E402
+from mailrunner_rx.routes import Routes  # noqa: E402
+
+
+class RouteCache:
+    """routes.json, reloaded when "generated/current" changes."""
+
+    def __init__(self):
+        self.mtime = None
+        self.routes = Routes({})
+
+    def get(self):
+        try:
+            mtime = os.stat(config.ROUTES_FILE).st_mtime_ns
+            target = os.path.realpath(config.ROUTES_FILE)
+        except FileNotFoundError:
+            return self.routes
+        if (mtime, target) != self.mtime:
+            self.routes = Routes.load(config.ROUTES_FILE)
+            self.mtime = (mtime, target)
+        return self.routes
+
+
+ROUTES = RouteCache()
+
+
+def log(level, text):
+    syslog.syslog(level, text)
+
+
+def localpart(addr):
+    return addr.split("@")[0] if "@" in addr else ""
+
+
+def strip_brackets(addr):
+    return (addr or "").strip().lstrip("<").rstrip(">")
+
+
+class ReceiveMilter(Milter.Base):
+    def __init__(self):
+        self.client_ip = ""
+        self.client_name = ""
+        self.helo = ""
+        self.reset()
+
+    def reset(self):
+        self.mail_from = ""
+        self.recipients = []   # (address, route)
+        self.tls = (None, None, None)
+        self.project_id = None
+        self.headers = []
+        self.body_chunks = []
+        self.size = 0
+
+    # Ask Postfix for headers with their original leading space (exact raw rebuild for DKIM).
+    def negotiate(self, opts):
+        offered = opts[1]
+        result = super().negotiate(opts)
+        if offered & Milter.P_HDR_LEADSPC:
+            opts[1] |= Milter.P_HDR_LEADSPC
+            self._protocol = opts[1]
+        else:
+            log(syslog.LOG_WARNING, "MTA does not offer HDR_LEADSPC; raw rebuild may differ")
+        return result
+
+    def connect(self, hostname, family, hostaddr):
+        if family in (socket.AF_INET, socket.AF_INET6) and hostaddr:
+            self.client_ip = hostaddr[0]
+        self.client_name = hostname or ""
+        return Milter.CONTINUE
+
+    def hello(self, heloname):
+        self.helo = heloname or ""
+        return Milter.CONTINUE
+
+    def envfrom(self, mailfrom, *params):
+        self.reset()
+        self.mail_from = strip_brackets(mailfrom)
+        self.tls = (self.getsymval("{tls_version}"), self.getsymval("{cipher}"), self.getsymval("{cipher_bits}"))
+        self.by_host = self.getsymval("j") or socket.getfqdn()
+        return Milter.CONTINUE
+
+    def envrcpt(self, to, *params):
+        addr = strip_brackets(to)
+        route = ROUTES.get().lookup(addr)
+        if route is None:
+            self.setreply("450", "4.1.1", "Recipient not available, try again later")
+            return Milter.TEMPFAIL
+        if self.project_id is not None and route["project_id"] != self.project_id:
+            # one project per transaction; the client sends the rest in a new transaction
+            self.setreply("452", "4.5.3", "Too many recipients for this transaction")
+            return Milter.TEMPFAIL
+        self.project_id = route["project_id"]
+        self.recipients.append((addr, route))
+        return Milter.CONTINUE
+
+    @Milter.decode("bytes")
+    def header(self, name, value):
+        self.headers.append((name, value))
+        return Milter.CONTINUE
+
+    def body(self, chunk):
+        self.body_chunks.append(chunk)
+        self.size += len(chunk)
+        return Milter.CONTINUE
+
+    def eom(self):
+        started = time.monotonic()
+        queue_id = self.getsymval("i") or ""
+        try:
+            received = message.received_header(self.client_name, self.client_ip, self.helo, self.by_host, queue_id,
+                                               self.recipients[0][0] if len(self.recipients) == 1 else "",
+                                               *self.tls)
+            if len(self.recipients) != 1:
+                received = received.replace(b"\tfor <>; ", b"\t")
+            raw = received + message.build_raw(self.headers, self.body_chunks)
+            outcome = self.process(raw, queue_id, started)
+        except Exception as e:
+            log(syslog.LOG_ERR, f"queue_id={queue_id} tempfail: {e.__class__.__name__}: {e}")
+            self.setreply("451", "4.3.0", "Temporary local problem, please try again later")
+            return Milter.TEMPFAIL
+        if outcome == "tempfail_timeout":
+            self.setreply("451", "4.7.0", "Message check not finished, please try again later")
+            return Milter.TEMPFAIL
+        return Milter.DISCARD  # 250 to the client; Postfix drops its queue copy
+
+    def process(self, raw, queue_id, started):
+        key = crypto.load_key(config.NODE_KEY_FILE)
+        creds = secrets.load()
+        received_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        summary = message.summary(raw)
+        attachments = message.attachments(raw)
+        sha256 = hashlib.sha256(raw).hexdigest()
+        msg = email.message_from_bytes(raw)
+
+        for rcpt, route in self.recipients:
+            remaining = config.ANALYSIS_LIMIT_SECONDS - (time.monotonic() - started)
+            mail_id = localpart(rcpt) or localpart(parseaddr(msg.get("To", ""))[1]) or (msg.get("Message-ID") or "").strip("<>")
+            envelope = {"client_ip": self.client_ip or "0.0.0.0", "helo": self.helo or "unknown",
+                        "mail_from": self.mail_from, "rcpt": rcpt}
+            analysis_status = "ok"
+            try:
+                result = analyzer.analyze(raw, envelope, creds, mail_id, remaining)
+            except analyzer.AnalysisTimeout:
+                if route["profile"] != "analysis":
+                    log(syslog.LOG_WARNING, f"queue_id={queue_id} project={route['project']} analysis timeout -> 451")
+                    return "tempfail_timeout"
+                analysis_status = "timeout"
+                result = {"queue_id": queue_id, "smtp_mail_from": self.mail_from, "smtp_rcpt_to": rcpt,
+                          "spf_status": None, "dkim_status": None, **summary,
+                          "debug": {"error": "timeout", "limit_seconds": config.ANALYSIS_LIMIT_SECONDS}}
+
+            message_id = store.new_id()
+            record = {k: result.get(k) for k in ("queue_id", "smtp_mail_from", "smtp_rcpt_to", "header_from",
+                                                  "header_to", "subject", "date_hdr", "spf_status", "dkim_status")}
+            record.update(mail_id=mail_id, created=received_at)
+            analysis_doc = {"record": record, "debug": result.get("debug"), "raw_headers": message.header_block(raw),
+                            "attachments": attachments}
+            meta = {
+                "spool_id": message_id, "received_at": received_at, "queue_id": queue_id,
+                "client_ip": self.client_ip, "client_name": self.client_name, "helo": self.helo,
+                "mail_from": self.mail_from, "rcpt": rcpt,
+                "project_id": route["project_id"], "project": route["project"], "profile": route["profile"],
+                "size": len(raw), "sha256": sha256, "attachments": attachments, **summary,
+                "spf_status": record["spf_status"], "dkim_status": record["dkim_status"],
+                "analysis_status": analysis_status,
+                "analysis_ms": round((time.monotonic() - started) * 1000),
+            }
+            keep_raw = route["profile"] != "analysis"   # E-12: profile analysis keeps no raw mail
+            store.save(config.STORE_DIR, config.SPOOL_DIR, key, message_id, analysis_doc, meta, raw if keep_raw else None)
+            log(syslog.LOG_INFO, f"stored id={message_id} queue_id={queue_id} project={route['project']} "
+                                 f"profile={route['profile']} analysis={analysis_status} ms={meta['analysis_ms']} raw_kept={keep_raw}")
+        return "keep"
+
+
+def main():
+    syslog.openlog("mailrunner-milter", syslog.LOG_PID, syslog.LOG_MAIL)
+    analyzer.use_node_resolver()
+    Milter.factory = ReceiveMilter
+    Milter.set_flags(0)  # no header/body modifications
+    log(syslog.LOG_INFO, f"starting on {config.MILTER_SOCKET}, limit {config.ANALYSIS_LIMIT_SECONDS:.0f} s")
+    Milter.runmilter("mailrunner-milter", config.MILTER_SOCKET, timeout=int(config.ANALYSIS_LIMIT_SECONDS) + 30)
+
+
+if __name__ == "__main__":
+    main()

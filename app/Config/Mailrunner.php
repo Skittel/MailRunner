@@ -54,6 +54,11 @@ class Mailrunner extends BaseConfig
         return $this->dataDir . '/receive/spool';
     }
 
+    public function receiveStoreDir(): string
+    {
+        return $this->dataDir . '/receive/store';
+    }
+
     /**
      * Returns the enabled roles as a list, e.g. ["receive", "send"].
      *

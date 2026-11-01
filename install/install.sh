@@ -36,7 +36,8 @@ log "Packages"
 echo "postfix postfix/main_mailer_type select No configuration" | debconf-set-selections
 echo "postfix postfix/mailname string $HOST" | debconf-set-selections
 DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
-    postfix postfix-pcre python3-nacl python3-dkim python3-spf python3-dnspython python3-cryptography openssl \
+    postfix postfix-pcre python3-milter python3-nacl python3-dkim python3-spf python3-dnspython python3-cryptography \
+    python3-requests openssl unbound \
     php-cli php-fpm php-mysql php-intl php-mbstring php-curl php-xml composer mariadb-server nginx rsync >/dev/null
 
 log "System user and directories"
@@ -44,7 +45,7 @@ getent passwd mailrunner >/dev/null || useradd --system --user-group --home-dir 
 install -d -o root -g mailrunner -m 0750 /etc/mailrunner /etc/mailrunner/generated
 install -d -o mailrunner -g mailrunner -m 0750 /var/lib/mailrunner /var/lib/mailrunner/receive \
     /var/lib/mailrunner/receive/spool /var/lib/mailrunner/receive/spool/tmp /var/lib/mailrunner/receive/spool/new \
-    /var/lib/mailrunner/receive/spool/analyzed /var/lib/mailrunner/receive/spool/failed \
+    /var/lib/mailrunner/receive/spool/analyzed /var/lib/mailrunner/receive/spool/failed /var/lib/mailrunner/receive/store \
     /var/lib/mailrunner/writable /var/lib/mailrunner/writable/cache /var/lib/mailrunner/writable/logs \
     /var/lib/mailrunner/writable/session /var/lib/mailrunner/writable/uploads /var/lib/mailrunner/writable/debugbar
 install -d -m 0755 /opt/mailrunner /opt/mailrunner/releases
@@ -93,6 +94,15 @@ BLM_PASS=
 SECRETS
 fi
 
+log "DNS resolver (unbound, shared TTL cache)"
+install -m 0644 "$T/dns/unbound-mailrunner.conf" /etc/unbound/unbound.conf.d/mailrunner.conf
+unbound-checkconf >/dev/null
+systemctl enable --now unbound >/dev/null 2>&1
+systemctl restart unbound
+install -d /etc/systemd/resolved.conf.d
+install -m 0644 "$T/dns/resolved-mailrunner.conf" /etc/systemd/resolved.conf.d/mailrunner.conf
+systemctl restart systemd-resolved
+
 log "Release $VERSION"
 REL="/opt/mailrunner/releases/${VERSION}-$(date -u +%Y%m%d%H%M%S)"
 rsync -a --exclude /.git --exclude /vendor --exclude /.env --exclude /writable --exclude __pycache__ \
@@ -113,12 +123,17 @@ log "Postfix configuration"
 [[ -f /etc/postfix/main.cf.orig-mailrunner || ! -f /etc/postfix/main.cf ]] || cp -a /etc/postfix/main.cf /etc/postfix/main.cf.orig-mailrunner
 [[ -f /etc/postfix/master.cf.orig-mailrunner ]] || cp -a /etc/postfix/master.cf /etc/postfix/master.cf.orig-mailrunner
 render "$T/receive/postfix-main.cf" > /etc/postfix/main.cf
-sed -i '/^# --- MailRunner receive role/,$d' /etc/postfix/master.cf
-cat "$T/receive/postfix-master-append.cf" >> /etc/postfix/master.cf
+sed -i '/^# --- MailRunner receive role/,$d' /etc/postfix/master.cf   # old pipe transport (<= 0.0.6)
 log "Database migrations, node key, mail path configuration"
 runuser -u mailrunner -- php /opt/mailrunner/current/spark migrate --all
 php /opt/mailrunner/current/spark mr:node:init
 php /opt/mailrunner/current/spark mr:apply --no-reload
+
+log "Milter"
+install -m 0644 "$T/systemd/mailrunner-milter.service" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable mailrunner-milter >/dev/null 2>&1
+systemctl restart mailrunner-milter
 
 log "Start Postfix"
 
@@ -127,9 +142,12 @@ systemctl enable --now postfix >/dev/null 2>&1
 postfix reload >/dev/null 2>&1 || systemctl restart postfix
 
 log "systemd units"
+# units of the old pipe path (<= 0.0.6)
+systemctl disable --now mailrunner-analyze.path >/dev/null 2>&1 || true
+rm -f /etc/systemd/system/mailrunner-analyze.path /etc/systemd/system/mailrunner-analyze.service
 install -m 0644 "$T"/systemd/mailrunner-* /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now mailrunner-analyze.path mailrunner-import.path mailrunner-apply.path mailrunner-maintenance.timer >/dev/null 2>&1
+systemctl enable --now mailrunner-import.path mailrunner-apply.path mailrunner-maintenance.timer >/dev/null 2>&1
 
 log "API (php-fpm + nginx)"
 FPM_DIR="$(ls -d /etc/php/*/fpm | sort -V | tail -1)"

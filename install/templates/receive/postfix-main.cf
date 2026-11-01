@@ -26,8 +26,19 @@ relay_domains =
 # Recipients: generated from the database by "spark mr:apply"
 virtual_mailbox_domains = texthash:/etc/mailrunner/generated/current/domains
 virtual_mailbox_maps = texthash:/etc/mailrunner/generated/current/mailboxes
-virtual_transport = mrdeliver:
-mrdeliver_destination_recipient_limit = 1
+# Messages are stored by mr-milter before the 250; the milter answers DISCARD, so nothing is
+# delivered from the Postfix queue. "discard" is only a safety net (never bounce).
+virtual_transport = discard:
+
+# mr-milter decides during the session (decision E-11): store, analyse, then 250 / 451.
+# Time limit per message 90 s (milter); Postfix waits a bit longer. No milter = 451, never unchecked.
+smtpd_milters = inet:127.0.0.1:8899
+non_smtpd_milters =
+milter_protocol = 6
+milter_default_action = tempfail
+milter_connect_timeout = 10s
+milter_command_timeout = 70s
+milter_content_timeout = 120s
 
 smtpd_helo_required = yes
 smtpd_relay_restrictions = permit_mynetworks, reject_unauth_destination

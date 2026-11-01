@@ -1,3 +1,0 @@
-# --- MailRunner receive role (install.sh) ---
-mrdeliver unix  -       n       n       -       10      pipe
-  user=mailrunner argv=/opt/mailrunner/current/mailpath/receive/bin/mr-deliver --queue-id=${queue_id} --client=${client_address} --helo=${client_helo} --sender=${sender} --recipient=${original_recipient} --final-recipient=${recipient}
