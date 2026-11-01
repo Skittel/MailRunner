@@ -42,8 +42,15 @@ paths:
                   - $ref: '#/components/schemas/Envelope'
                   - type: object
                     properties:
-                      version: { type: string, example: 0.0.11 }
+                      version: { type: string, example: 0.0.14 }
                       roles: { type: array, items: { type: string, enum: [receive, send] } }
+                      selftest:
+                        type: [object, 'null']
+                        description: 'Last node self test (hourly); null if none yet'
+                        properties:
+                          status: { type: string, enum: [pass, fail, error] }
+                          finished_at: { type: [string, 'null'], format: date-time }
+                          failed: { type: array, items: { type: string }, example: ['smtp.v4.certificate'] }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/ProjectDisabled' }
 
@@ -172,6 +179,10 @@ paths:
         - `smtp.connection`: an SMTP session without MAIL FROM (e.g. scanners, aborted TLS); never
           belongs to a project.
 
+        `node.selftest` (`scope: node`, visible to every project): result of the hourly node self test with
+        `status` (pass | fail | error), `version`, `started_at`, `finished_at`, `duration_ms`, `ok`, and
+        `failed` / `warnings` as lists of `{name, detail}`.
+
         Events without a project (`scope: unassigned`) are visible depending on the project setting
         `journal_scope` (set by the operator): `own` = none, `connections` = `smtp.connection`,
         `unassigned` = all `smtp.*` events without a project. Delivery attempts are kept 30 days
@@ -205,7 +216,7 @@ paths:
                             id: { type: integer }
                             created_at: { type: string, format: date-time }
                             event: { type: string, example: smtp.attempt }
-                            scope: { type: string, enum: [project, unassigned] }
+                            scope: { type: string, enum: [project, unassigned, node] }
                             details:
                               oneOf:
                                 - $ref: '#/components/schemas/SmtpAttempt'

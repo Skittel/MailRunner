@@ -217,9 +217,11 @@ def scenarios(run):
     def rcpt(name):
         return f"st-{run.run_id}-{name}@{RCPT_DOMAIN}"
 
-    def mail(name, hdr_from, to=None, sign=None, tamper=False, mail_from=None, family=4, tls=True, expect=None):
+    def mail(name, hdr_from, outlook=False, sign=None, tamper=False, mail_from=None, family=4, tls=True, expect=None):
         to_addr = rcpt(name)
-        raw = mt.build(hdr_from, to or to_addr, subject=f"{subject} {name}", domain=f"pass.{ZONE}")
+        raw = mt.build(hdr_from, "PLACEHOLDER-TO" if outlook else to_addr, subject=f"{subject} {name}", domain=f"pass.{ZONE}")
+        if outlook:   # like Outlook/M365: display name = quoted address, To header folded over two lines
+            raw = raw.replace(b"PLACEHOLDER-TO", f"\"'{to_addr}'\"\r\n\t<{to_addr}>".encode(), 1)
         if sign:
             raw = mt.sign(raw, sign[0], sign[1], f"pass.{ZONE}")
         if tamper:
@@ -256,8 +258,9 @@ def scenarios(run):
          expect=want(record__smtp_mail_from="", debug__spf__identity="helo", debug__spf__result="pass",
                      debug__dmarc__result="pass"))
     to = rcpt("outlook_to")
-    mail("outlook_to", ok_from, to=f"'{to}' <{to}>", sign=("s2048", "s2048.key"),
-         expect=want(debug__header__to__0__address=to, debug__header__to__0__display_name_is_address=True))
+    mail("outlook_to", ok_from, outlook=True, sign=("s2048", "s2048.key"),
+         expect=want(debug__header__to__0__address=to, debug__header__to__0__display_name_is_address=True,
+                     debug__dkim__result="pass"))
     return out, subject
 
 
@@ -282,6 +285,7 @@ def smtp_session(run, ip, family, items, tls, extra_checks=False):
     t0 = time.monotonic()
     s = smtplib.SMTP(timeout=FAIL_250_S + 30)
     s.connect(ip, 25)
+    s._host = run.hostname   # name for SNI and certificate check (connected by address)
     s.ehlo(HELO)
     if tls:
         if not s.has_extn("starttls"):
@@ -289,7 +293,7 @@ def smtp_session(run, ip, family, items, tls, extra_checks=False):
             s.quit()
             return times
         ctx = ssl.create_default_context()
-        s.starttls(context=ctx, server_hostname=run.hostname)   # verifies chain and name
+        s.starttls(context=ctx)   # verifies chain and name (s._host)
         cert = s.sock.getpeercert()
         days = (ssl.cert_time_to_seconds(cert["notAfter"]) - time.time()) / 86400
         version = s.sock.version()

@@ -42,7 +42,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
 
 log "Self test level 1 (mail path and analysis without network)"
 # A failing test stops the installation before anything is changed.
-if ! (cd "$SOURCE" && PYTHONDONTWRITEBYTECODE=1 MR_NO_SYSLOG=1 python3 -I -m unittest discover -s mailpath/tests -q 2>&1 | tail -n 3); then
+if ! (cd "$SOURCE" && MR_NO_SYSLOG=1 python3 -I -B -m unittest discover -s mailpath/tests -q 2>&1 | tail -n 3); then
     echo "ERROR: tests failed, nothing installed" >&2
     exit 1
 fi
@@ -116,7 +116,7 @@ unbound-checkconf >/dev/null
 systemctl enable --now unbound >/dev/null 2>&1
 systemctl restart unbound
 # local self test zone selftest.test (needs the running resolver to look up the node's addresses)
-PYTHONDONTWRITEBYTECODE=1 python3 -I "$SOURCE/install/gen-selftest-zone.py" "$HOST" /etc/unbound/unbound.conf.d/mailrunner-selftest.conf
+python3 -I -B "$SOURCE/install/gen-selftest-zone.py" "$HOST" /etc/unbound/unbound.conf.d/mailrunner-selftest.conf
 chmod 0644 /etc/unbound/unbound.conf.d/mailrunner-selftest.conf
 unbound-checkconf >/dev/null
 systemctl restart unbound
@@ -171,6 +171,7 @@ systemctl daemon-reload
 systemctl enable --now mailrunner-import.path mailrunner-apply.path mailrunner-maintenance.timer >/dev/null 2>&1
 # journal of delivery attempts (reads the mail log; restart picks up a new release)
 systemctl enable mailrunner-smtplog >/dev/null 2>&1
+systemctl reset-failed mailrunner-import.service mailrunner-import.path >/dev/null 2>&1 || true
 systemctl restart mailrunner-smtplog mailrunner-import.path
 
 log "API (php-fpm + nginx)"

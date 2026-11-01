@@ -160,7 +160,8 @@ class SelftestHelpersTest(unittest.TestCase):
         bad = dict(good, dkim={"result": "fail"})
         self.assertEqual(["debug.dkim.result='fail' expected 'pass'"], items["pass4"]["expect"](bad, {}))
         to = items["outlook_to"]["rcpt"]
-        self.assertEqual([], items["outlook_to"]["expect"]({"header": {"to": [{"address": to, "display_name_is_address": True}]}}, {}))
+        self.assertEqual([], items["outlook_to"]["expect"]({"header": {"to": [{"address": to, "display_name_is_address": True}]}, "dkim": {"result": "pass"}}, {}))
+        self.assertIn(b"\r\n\t<" + to.encode() + b">", items["outlook_to"]["raw"])
 
     def test_result_status(self):
         from mailrunner_rx import selftest

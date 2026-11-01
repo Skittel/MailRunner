@@ -1,12 +1,18 @@
 [Unit]
 Description=MailRunner: import analysed spool entries (spark mr:import)
 After=mariadb.service
+# The path unit starts this for every new spool file. Bursts of mail must never hit systemd's start
+# limit (default 5 starts in 10 s), otherwise the path unit stops for good. The pause after each run
+# collects the files of a burst into one import and caps a retry loop (database down) at ~1 run/s.
+StartLimitIntervalSec=60
+StartLimitBurst=1000
 
 [Service]
 Type=oneshot
 User=mailrunner
 Group=mailrunner
 ExecStart=/usr/bin/php /opt/mailrunner/current/spark mr:import
+ExecStartPost=/bin/sleep 1
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict

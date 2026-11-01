@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.0.14 - 2026-11-01
+- Self test (decision E-17).
+  - Level 1: SmartMailFlow's 102 analysis tests (fixed DNS, no network) are vendored and run with the
+    MailRunner tests; `install.sh` stops before changing anything if a test fails.
+  - Level 2: `mr:selftest` (hourly timer `mailrunner-selftest.timer` and after every install) checks
+    services, disk, mail queue, spool backlog, time sync, node key, DNSSEC validation, Spamhaus DQS key,
+    reachability of ipregistry/blacklistmaster (no quota), SMTP over public IPv4/IPv6 (STARTTLS,
+    certificate name and >= 14 days, recipient pattern, no open relay, postmaster, time to 250),
+    7 analysis scenarios with fixed expectations (local zone `selftest.test` in unbound, test DKIM keys)
+    and the API life cycle (collect, completeness, encryption at rest, isolation, ack, journal, deletion).
+  - Result: journal event `node.selftest` (visible to every project, `scope: node`), `selftest` in
+    `GET /v1/node/status`, last run in `/var/lib/mailrunner/selftest/last.{json,txt}`.
+  - Self test configuration like any customer: projects `system/selftest` and `system/selftest-isolation`,
+    tokens in `/etc/mailrunner/selftest.env` (created by `install.sh`).
+- Mail from the node's own addresses does not query blacklistmaster/ipregistry (no quota).
+- Fix: bursts of mail hit systemd's start limit of `mailrunner-import.service` and stopped the import
+  path unit for good (found by the self test). Start limit raised, 1 s pause after each import run.
+- `mr:maintenance` also deletes `node.selftest` journal entries after `MAILRUNNER_SMTP_JOURNAL_DAYS`.
+
 ## 0.0.13 - 2026-11-01
 - mr-smtplog: read journalctl unbuffered. With a buffered pipe, select() did not report lines already
   read into the Python buffer, so the last line of a session (disconnect) waited for the next log line.

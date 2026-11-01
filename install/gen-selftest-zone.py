@@ -58,17 +58,16 @@ def main():
     add("client", "TXT", txt(spf_ok))
     # recipient domain (route of project system/selftest)
     add("rx", "MX", f"10 {hostname}.")
-    # pass: SPF ok, DKIM keys, DMARC reject, Return-Path with MX
+    # pass: SPF ok, DKIM keys, DMARC reject
     add("pass", "TXT", txt(spf_ok))
-    add("pass", "MX", f"10 mx.pass.{ZONE}.")
-    add("mx.pass", "A", "192.0.2.25")
-    add("mx.pass", "AAAA", "2001:db8::25")
+    # Null MX: the analysis would otherwise probe STARTTLS at the sender's MX (8 s timeout per unreachable host)
+    add("pass", "MX", "0 .")
     add("_dmarc.pass", "TXT", txt("v=DMARC1; p=reject"))
     add("s2048._domainkey.pass", "TXT", txt(dkim_record("s2048.key")))
     add("ed25519._domainkey.pass", "TXT", txt(dkim_record("ed25519.key")))
     # spffail: SPF -all, DMARC reject -> spf fail, dmarc fail
     add("spffail", "TXT", txt("v=spf1 -all"))
-    add("spffail", "MX", f"10 mx.pass.{ZONE}.")
+    add("spffail", "MX", "0 .")
     add("_dmarc.spffail", "TXT", txt("v=DMARC1; p=reject"))
 
     body = "\n".join([
