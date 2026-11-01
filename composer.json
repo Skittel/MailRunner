@@ -36,5 +36,6 @@
     },
     "scripts": {
         "test": "phpunit"
-    }
+    },
+    "license": "LicenseRef-MailRunner"
 }

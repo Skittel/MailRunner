@@ -12,6 +12,8 @@ when it was delivered or collected.
 
 **Status:** early development (0.0.x). The receive role is built first.
 
+**Documentation:** https://wiki.skit.center/books/mailrunnerpub
+
 ## Layout
 
 | Path | Content |
@@ -35,3 +37,10 @@ composer test
 ## Versioning
 
 `n.n.n`, each part 0-999. The current version is in `VERSION`; changes are listed in `CHANGELOG.md`.
+
+## License
+
+Free for private and commercial use, modification and redistribution
+(MIT-style). The only condition beyond the MIT terms: projects that use or
+are derived from MailRunner must mention MailRunner with a link to
+https://github.com/Skittel/MailRunner in their README. See [LICENSE](LICENSE).

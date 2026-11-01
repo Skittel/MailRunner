@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.2 - 2026-11-01
+- License: MIT with attribution clause (see LICENSE).
+- README links to the public documentation.
+
 ## 0.0.1 - 2026-11-01
 - Project skeleton based on CodeIgniter 4.7.
 - Directory layout for shared core, receive and send modules, mail path and installer.
