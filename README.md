@@ -29,10 +29,24 @@ when it was delivered or collected.
 
 ```bash
 composer install
-cp env .env          # adjust MAILRUNNER_* values
+cp env .env          # set MAILRUNNER_* and database.default.* / database.tests.*
+php spark migrate --all
 php spark mr:status
-composer test
+composer test        # needs the MariaDB test database (database.tests.*)
 ```
+
+## CLI example
+
+```bash
+php spark mr:customer:create acme --name="ACME"
+php spark mr:project:create acme/inbox --profile=checked
+php spark mr:route:set acme/inbox inbox.example.com
+php spark mr:token:create acme/inbox --label="ticket system"   # secret shown once
+php spark mr:token:rotate mrt_xxxxxxxxxxxxxxxx --grace=24h
+php spark mr:project:show acme/inbox
+```
+
+Run `php spark list` for all `mr:` commands.
 
 ## Versioning
 
