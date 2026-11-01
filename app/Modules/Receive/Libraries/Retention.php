@@ -14,6 +14,7 @@ use CodeIgniter\Database\BaseConnection;
  * - content N hours after ack (delete_after_ack_hours)  -> event receive.deleted (ack_retention)
  * - content of unacknowledged messages after N days     -> event receive.expired
  * - metadata rows after N days (metadata_days); the journal keeps its own period.
+ * - journal entries of delivery attempts (smtp.*) after the node setting smtpJournalDays.
  */
 class Retention
 {
@@ -21,15 +22,16 @@ class Retention
         private readonly BaseConnection $db,
         private readonly JournalWriter $journal,
         private readonly ?MessageStore $files = null,
+        private readonly int $smtpJournalDays = 30,
     ) {
     }
 
     /**
-     * @return array{deleted: int, expired: int, purged: int}
+     * @return array{deleted: int, expired: int, purged: int, smtp_journal: int}
      */
     public function run(): array
     {
-        $stats = ['deleted' => 0, 'expired' => 0, 'purged' => 0];
+        $stats = ['deleted' => 0, 'expired' => 0, 'purged' => 0, 'smtp_journal' => 0];
         $now   = Time::nowObject();
 
         foreach ($this->db->table('projects')->get()->getResultArray() as $project) {
@@ -43,6 +45,11 @@ class Retention
             $this->db->query('DELETE FROM receive_messages WHERE project_id = ? AND content_deleted_at IS NOT NULL AND received_at <= ?', [$project['id'], $metaLimit]);
             $stats['purged'] += $this->db->affectedRows();
         }
+
+        $smtpLimit = $now->modify('-' . max(1, $this->smtpJournalDays) . ' days')->format(Time::DB_FORMAT);
+        $this->db->query("DELETE FROM journal WHERE event IN ('smtp.connection', 'smtp.attempt') AND created_at <= ?", [$smtpLimit]);
+        $stats['smtp_journal'] = $this->db->affectedRows();
+        $this->db->query('DELETE FROM receive_smtp_sessions WHERE imported_at <= ?', [$smtpLimit]);
 
         return $stats;
     }

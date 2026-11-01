@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MailRunner customer API (receive)
-  version: 0.0.11
+  version: 0.0.12
   description: |
     Pull API of a MailRunner node. A client application collects the messages the node accepted
     for its project. A token belongs to exactly one project and only sees that project's data.
@@ -162,9 +162,20 @@ paths:
     get:
       summary: Events of the project, oldest first
       description: |
-        Event types include `receive.received`, `receive.acked`, `receive.deleted`, `receive.expired`
-        and configuration changes of the project (`project.updated`, `routes.updated`, `token.created`, ...;
-        never secrets). If `node_id` changes, start again with `after_id=0`.
+        Event types include `receive.received`, `receive.acked`, `receive.deleted`, `receive.expired`,
+        configuration changes of the project (`project.updated`, `routes.updated`, `token.created`, ...;
+        never secrets) and the delivery attempts:
+
+        - `smtp.attempt`: one SMTP transaction (MAIL FROM ...) with the recipients of this project, their
+          answers and the result. A transaction with recipients of several projects yields one event per
+          project, each listing only its own recipients and message ids.
+        - `smtp.connection`: an SMTP session without MAIL FROM (e.g. scanners, aborted TLS); never
+          belongs to a project.
+
+        Events without a project (`scope: unassigned`) are visible depending on the project setting
+        `journal_scope` (set by the operator): `own` = none, `connections` = `smtp.connection`,
+        `unassigned` = all `smtp.*` events without a project. Delivery attempts are kept 30 days
+        (node setting). If `node_id` changes, start again with `after_id=0`.
       parameters:
         - name: after_id
           in: query
@@ -172,6 +183,10 @@ paths:
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+        - name: event
+          in: query
+          description: 'Comma-separated event names, e.g. `smtp.attempt,smtp.connection`'
+          schema: { type: string }
       responses:
         '200':
           description: OK
@@ -189,10 +204,16 @@ paths:
                           properties:
                             id: { type: integer }
                             created_at: { type: string, format: date-time }
-                            event: { type: string, example: receive.received }
-                            details: { type: [object, 'null'], additionalProperties: true }
+                            event: { type: string, example: smtp.attempt }
+                            scope: { type: string, enum: [project, unassigned] }
+                            details:
+                              oneOf:
+                                - $ref: '#/components/schemas/SmtpAttempt'
+                                - $ref: '#/components/schemas/SmtpConnection'
+                                - { type: [object, 'null'], additionalProperties: true }
                       next_after_id: { type: integer }
                       has_more: { type: boolean }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
 components:
@@ -323,3 +344,54 @@ components:
                 blacklistmaster and ipregistry. Results taken from the node cache carry `cached` and `cached_at`.
               additionalProperties: true
             raw_headers: { type: [string, 'null'], description: 'all header lines as received' }
+
+    SmtpSession:
+      type: object
+      properties:
+        session_id: { type: string, example: mrs_c9475f35fbb2d47c03c9 }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+        client:
+          type: object
+          properties:
+            ip: { type: string, example: 192.0.2.10 }
+            port: { type: [integer, 'null'] }
+            name: { type: string, description: 'reverse DNS name as checked by Postfix, "unknown" if none' }
+        helo: { type: [string, 'null'], description: 'last HELO/EHLO name' }
+        tls:
+          type: [object, 'null']
+          properties:
+            protocol: { type: string, example: TLSv1.3 }
+            cipher: { type: string }
+        end: { type: string, description: '"disconnect", "lost connection after DATA", "timeout after RCPT", "incomplete" ...' }
+
+    SmtpConnection:
+      allOf:
+        - $ref: '#/components/schemas/SmtpSession'
+        - type: object
+          properties:
+            commands: { type: [string, 'null'], description: 'Postfix command statistics, e.g. "ehlo=1 starttls=1 commands=2"' }
+            warnings: { type: array, items: { type: string }, example: ['non-SMTP command'] }
+
+    SmtpAttempt:
+      allOf:
+        - $ref: '#/components/schemas/SmtpSession'
+        - type: object
+          properties:
+            attempt: { type: integer, description: 'number of the transaction within the session' }
+            mail_from: { type: [string, 'null'], description: 'empty string for bounces, null if unknown' }
+            queue_id: { type: [string, 'null'] }
+            recipients:
+              type: array
+              items:
+                type: object
+                properties:
+                  rcpt: { type: string }
+                  status: { type: string, enum: [accepted, rejected, tempfail] }
+                  reply: { type: [string, 'null'], example: '550 5.1.1 <x@example.org>: Recipient address rejected: User unknown' }
+            result:
+              type: object
+              properties:
+                status: { type: string, enum: [accepted, rejected, tempfail, aborted, none], description: 'accepted = stored (250); none = no data for these recipients' }
+                reply: { type: [string, 'null'] }
+            message_ids: { type: array, items: { type: string }, description: 'messages of this project created by the attempt' }

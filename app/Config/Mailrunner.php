@@ -27,6 +27,9 @@ class Mailrunner extends BaseConfig
     /** Directory holding spool, store and other runtime data. */
     public string $dataDir = '/var/lib/mailrunner';
 
+    /** Days the journal keeps delivery attempts (smtp.connection / smtp.attempt). */
+    public int $smtpJournalDays = 30;
+
     public function __construct()
     {
         parent::__construct();
@@ -37,6 +40,7 @@ class Mailrunner extends BaseConfig
         $this->nodeId         = (string) (env('MAILRUNNER_NODE_ID') ?? $this->nodeId);
         $this->configDir      = rtrim((string) (env('MAILRUNNER_CONFIG_DIR') ?? $this->configDir), '/');
         $this->dataDir        = rtrim((string) (env('MAILRUNNER_DATA_DIR') ?? $this->dataDir), '/');
+        $this->smtpJournalDays = (int) (env('MAILRUNNER_SMTP_JOURNAL_DAYS') ?? $this->smtpJournalDays);
     }
 
     public function nodeKeyFile(): string

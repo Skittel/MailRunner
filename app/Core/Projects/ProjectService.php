@@ -16,10 +16,17 @@ class ProjectService
 {
     public const PROFILES = ['analysis', 'checked', 'checked_auth'];
 
+    /**
+     * Journal entries a project's token sees besides its own:
+     * own = none, connections = SMTP connections without MAIL FROM (IP, host name, EHLO, TLS),
+     * unassigned = all SMTP entries without a project (incl. sender/recipients of other domains).
+     */
+    public const JOURNAL_SCOPES = ['own', 'connections', 'unassigned'];
+
     /** Settings that may be changed with update(). */
     private const SETTINGS = [
         'name', 'enabled', 'recipient_pattern', 'recipient_always_allow',
-        'delete_after_ack_hours', 'unacked_days', 'metadata_days',
+        'delete_after_ack_hours', 'unacked_days', 'metadata_days', 'journal_scope',
     ];
 
     public function __construct(
@@ -95,6 +102,9 @@ class ProjectService
         }
         if (array_key_exists('enabled', $changes)) {
             $changes['enabled'] = $changes['enabled'] ? 1 : 0;
+        }
+        if (array_key_exists('journal_scope', $changes) && ! in_array($changes['journal_scope'], self::JOURNAL_SCOPES, true)) {
+            throw new ConfigException('INVALID_SETTING', 'journal_scope must be one of: ' . implode(', ', self::JOURNAL_SCOPES));
         }
 
         return Transaction::run($this->db, function () use ($ref, $changes, $ctx): array {

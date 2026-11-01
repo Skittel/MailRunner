@@ -55,4 +55,6 @@ smtpd_tls_key_file = /etc/letsencrypt/live/{{HOSTNAME}}/privkey.pem
 smtpd_tls_security_level = may
 smtpd_tls_received_header = yes
 smtpd_tls_loglevel = 1
+# Client port in every smtpd log line: mr-smtplog joins Postfix and milter lines of one session by ip:port.
+smtpd_client_port_logging = yes
 smtpd_tls_session_cache_database = btree:${data_directory}/smtpd_scache

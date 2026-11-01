@@ -17,8 +17,8 @@ class Maintenance extends MrCommand
 
     protected function execute(): ?int
     {
-        $stats = (new Retention(db_connect(), service('journalWriter'), MessageStore::forNode()))->run();
-        $this->json() ? $this->outputJson($stats) : $this->ok(sprintf('Content deleted %d, expired %d, metadata purged %d', $stats['deleted'], $stats['expired'], $stats['purged']));
+        $stats = (new Retention(db_connect(), service('journalWriter'), MessageStore::forNode(), config('Mailrunner')->smtpJournalDays))->run();
+        $this->json() ? $this->outputJson($stats) : $this->ok(sprintf('Content deleted %d, expired %d, metadata purged %d, smtp journal entries purged %d', $stats['deleted'], $stats['expired'], $stats['purged'], $stats['smtp_journal']));
 
         return null;
     }

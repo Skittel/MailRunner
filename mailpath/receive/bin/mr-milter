@@ -67,9 +67,15 @@ def strip_brackets(addr):
     return (addr or "").strip().lstrip("<").rstrip(">")
 
 
+def log_safe(text, limit=320):
+    """Value for a session log line: printable, no spaces or angle brackets (comes from the client)."""
+    return "".join(ch if ch.isprintable() and ch not in " <>" else "?" for ch in (text or ""))[:limit]
+
+
 class ReceiveMilter(Milter.Base):
     def __init__(self):
         self.client_ip = ""
+        self.client_port = 0
         self.client_name = ""
         self.helo = ""
         self.reset()
@@ -97,11 +103,17 @@ class ReceiveMilter(Milter.Base):
     def connect(self, hostname, family, hostaddr):
         if family in (socket.AF_INET, socket.AF_INET6) and hostaddr:
             self.client_ip = hostaddr[0]
+            self.client_port = hostaddr[1] if len(hostaddr) > 1 else 0
         self.client_name = hostname or ""
         return Milter.CONTINUE
 
+    def session_log(self, event, text):
+        """Structured line for mr-smtplog (journal of delivery attempts); matched via client ip:port."""
+        log(syslog.LOG_INFO, f"session {event} client=[{self.client_ip}]:{self.client_port} {text}")
+
     def hello(self, heloname):
         self.helo = heloname or ""
+        self.session_log("helo", f"helo=<{log_safe(self.helo, 255)}>")
         return Milter.CONTINUE
 
     def envfrom(self, mailfrom, *params):
@@ -109,6 +121,7 @@ class ReceiveMilter(Milter.Base):
         self.mail_from = strip_brackets(mailfrom)
         self.tls = (self.getsymval("{tls_version}"), self.getsymval("{cipher}"), self.getsymval("{cipher_bits}"))
         self.by_host = self.getsymval("j") or socket.getfqdn()
+        self.session_log("mail", f"from=<{log_safe(self.mail_from)}>")
         return Milter.CONTINUE
 
     def envrcpt(self, to, *params):
@@ -123,6 +136,7 @@ class ReceiveMilter(Milter.Base):
             return Milter.TEMPFAIL
         self.project_id = route["project_id"]
         self.recipients.append((addr, route))
+        self.session_log("rcpt", f"to=<{log_safe(addr)}> result=accepted")
         return Milter.CONTINUE
 
     @Milter.decode("bytes")

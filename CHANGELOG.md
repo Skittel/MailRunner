@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.12 - 2026-11-01
+- Journal of delivery attempts: new service `mailrunner-smtplog` (`mr-smtplog`) follows the mail log
+  (Postfix smtpd/cleanup + milter session lines), builds one record per SMTP session and hands it to
+  `mr:import`. Journal events `smtp.attempt` (one per transaction and project, only own recipients and
+  message ids) and `smtp.connection` (session without MAIL FROM, no project).
+- Project setting `journal_scope` (`mr:project:set --journal-scope=own|connections|unassigned`):
+  which events without a project a token sees. Default `own`.
+- `GET /v1/journal`: field `scope` (`project` | `unassigned`), filter `event=a,b`.
+- mr-milter logs `session helo|mail|rcpt client=[ip]:port ...`; Postfix `smtpd_client_port_logging = yes`.
+- `mr:maintenance` deletes `smtp.*` journal entries after `MAILRUNNER_SMTP_JOURNAL_DAYS` (default 30).
+
 ## 0.0.11 - 2026-11-01
 - Customer API: `GET /v1/messages?include=content` returns `record`, `debug` and `raw_headers` with
   every message (page size max 100), so a client collects with one request per page instead of one per message.

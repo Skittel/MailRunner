@@ -1,0 +1,20 @@
+[Unit]
+Description=MailRunner: journal of delivery attempts (SMTP sessions from the mail log)
+After=systemd-journald.service mailrunner-milter.service
+
+[Service]
+Type=simple
+User=mailrunner
+Group=mailrunner
+SupplementaryGroups=systemd-journal
+ExecStart=/opt/mailrunner/current/mailpath/receive/bin/mr-smtplog
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/mailrunner/receive
+
+[Install]
+WantedBy=multi-user.target

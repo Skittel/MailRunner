@@ -1,8 +1,9 @@
 [Unit]
-Description=MailRunner: import analysed spool entries
+Description=MailRunner: import analysed spool entries and SMTP sessions
 
 [Path]
 PathExistsGlob=/var/lib/mailrunner/receive/spool/analyzed/*.json
+PathExistsGlob=/var/lib/mailrunner/receive/spool/smtp/*.json
 Unit=mailrunner-import.service
 
 [Install]

@@ -46,6 +46,7 @@ install -d -o root -g mailrunner -m 0750 /etc/mailrunner /etc/mailrunner/generat
 install -d -o mailrunner -g mailrunner -m 0750 /var/lib/mailrunner /var/lib/mailrunner/receive \
     /var/lib/mailrunner/receive/spool /var/lib/mailrunner/receive/spool/tmp /var/lib/mailrunner/receive/spool/new \
     /var/lib/mailrunner/receive/spool/analyzed /var/lib/mailrunner/receive/spool/failed /var/lib/mailrunner/receive/store \
+    /var/lib/mailrunner/receive/spool/smtp \
     /var/lib/mailrunner/writable /var/lib/mailrunner/writable/cache /var/lib/mailrunner/writable/logs \
     /var/lib/mailrunner/writable/session /var/lib/mailrunner/writable/uploads /var/lib/mailrunner/writable/debugbar
 install -d -m 0755 /opt/mailrunner /opt/mailrunner/releases
@@ -156,6 +157,9 @@ rm -f /etc/systemd/system/mailrunner-analyze.path /etc/systemd/system/mailrunner
 install -m 0644 "$T"/systemd/mailrunner-* /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now mailrunner-import.path mailrunner-apply.path mailrunner-maintenance.timer >/dev/null 2>&1
+# journal of delivery attempts (reads the mail log; restart picks up a new release)
+systemctl enable mailrunner-smtplog >/dev/null 2>&1
+systemctl restart mailrunner-smtplog mailrunner-import.path
 
 log "API (php-fpm + nginx)"
 FPM_DIR="$(ls -d /etc/php/*/fpm | sort -V | tail -1)"

@@ -4,6 +4,7 @@ namespace App\Commands;
 
 use App\Core\Secrets\NodeCrypto;
 use App\Modules\Receive\Libraries\Importer;
+use App\Modules\Receive\Libraries\SmtpSessionImporter;
 
 /**
  * mr:import - spool/analyzed/ -> database (started by systemd path unit as user mailrunner).
@@ -18,9 +19,15 @@ class Import extends MrCommand
     protected function execute(): ?int
     {
         $config = config('Mailrunner');
-        $stats  = (new Importer(db_connect(), service('journalWriter'), NodeCrypto::forNode(), $config->receiveSpoolDir()))->run();
-        $this->json() ? $this->outputJson($stats) : $this->ok(sprintf('Imported %d, duplicates %d, failed %d', $stats['imported'], $stats['duplicates'], $stats['failed']));
+        $crypto = NodeCrypto::forNode();
+        // messages first, so that smtp.attempt events can name their message ids
+        $stats = (new Importer(db_connect(), service('journalWriter'), $crypto, $config->receiveSpoolDir()))->run();
+        $smtp  = (new SmtpSessionImporter(db_connect(), service('journalWriter'), $crypto, $config->receiveSpoolDir()))->run();
+        $this->json() ? $this->outputJson($stats + ['smtp_sessions' => $smtp]) : $this->ok(sprintf(
+            'Messages: imported %d, duplicates %d, failed %d. SMTP sessions: imported %d, duplicates %d, failed %d',
+            $stats['imported'], $stats['duplicates'], $stats['failed'], $smtp['imported'], $smtp['duplicates'], $smtp['failed'],
+        ));
 
-        return $stats['failed'] > 0 ? 1 : null;
+        return ($stats['failed'] + $smtp['failed']) > 0 ? 1 : null;
     }
 }
