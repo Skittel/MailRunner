@@ -2,6 +2,7 @@
 
 namespace App\Modules\Receive\Libraries;
 
+use App\Core\Secrets\NodeCrypto;
 use RuntimeException;
 
 /**
@@ -11,8 +12,14 @@ use RuntimeException;
  */
 class ConfigApplier
 {
-    public function __construct(private readonly string $generatedDir)
-    {
+    /**
+     * @param list<string> $encryptedFiles files written encrypted as <name>.enc (context "generated:<name>")
+     */
+    public function __construct(
+        private readonly string $generatedDir,
+        private readonly ?NodeCrypto $crypto = null,
+        private readonly array $encryptedFiles = [],
+    ) {
     }
 
     /**
@@ -37,6 +44,13 @@ class ConfigApplier
             $tmp = $target . '.tmp-' . bin2hex(random_bytes(4));
             mkdir($tmp, 0o750);
             foreach ($files as $name => $content) {
+                if (in_array($name, $this->encryptedFiles, true)) {
+                    if ($this->crypto === null) {
+                        throw new RuntimeException('Node key needed to write ' . $name);
+                    }
+                    $content = $this->crypto->encrypt($content, 'generated:' . $name);
+                    $name .= '.enc';
+                }
                 file_put_contents($tmp . '/' . $name, $content);
                 chmod($tmp . '/' . $name, 0o640);
             }

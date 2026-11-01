@@ -69,6 +69,8 @@ def main():
 
 
 if __name__ == "__main__":
+    if os.environ.get("MR_NO_SYSLOG"):  # tests
+        syslog.syslog = lambda *args: None
     syslog.openlog("mailrunner-deliver", syslog.LOG_PID, syslog.LOG_MAIL)
     try:
         sys.exit(main())

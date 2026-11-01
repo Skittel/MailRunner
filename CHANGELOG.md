@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.5 - 2026-11-01
+- Project secrets (`project_secrets`), encrypted with the node key; only known names
+  (`spamhaus_dqs_key`, `blacklistmaster_user`, `blacklistmaster_pass`). Values are read from stdin and never shown.
+  CLI: `mr:secret:set`, `mr:secret:list`, `mr:secret:unset`.
+- `mr:apply` writes per-project analysis settings encrypted (`analysis.json.enc`); `mr-analyze` uses the
+  Spamhaus DQS key and, if configured, adds the blacklistmaster result (`debug.blacklistmaster`) like SmartMailFlow.
+- Mail path tests no longer write to the system log.
+
 ## 0.0.4 - 2026-11-01
 - Receive mail path, profile `analysis` (first end-to-end version):
   - Postfix (receive role): no local delivery, no outbound mail; recipients from generated maps;

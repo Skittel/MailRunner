@@ -2,6 +2,8 @@
 
 namespace App\Commands;
 
+use App\Core\Projects\ProjectSecretService;
+use App\Core\Secrets\NodeCrypto;
 use App\Core\Support\ChangeContext;
 use App\Core\Support\Transaction;
 use App\Modules\Receive\Libraries\ConfigApplier;
@@ -22,8 +24,10 @@ class Apply extends MrCommand
     protected function execute(): ?int
     {
         $db     = db_connect();
-        $files  = (new ConfigBuilder($db))->build();
-        $result = (new ConfigApplier(config('Mailrunner')->generatedDir()))->apply($files, ! $this->flag('no-reload'));
+        $crypto = NodeCrypto::forNode();
+        $files  = (new ConfigBuilder($db, new ProjectSecretService($db, service('journalWriter'), service('projectService'), $crypto)))->build();
+        $result = (new ConfigApplier(config('Mailrunner')->generatedDir(), $crypto, ConfigBuilder::ENCRYPTED_FILES))
+            ->apply($files, ! $this->flag('no-reload'));
 
         if ($result['changed']) {
             Transaction::run($db, static function () use ($result): void {

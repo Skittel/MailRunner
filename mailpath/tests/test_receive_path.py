@@ -55,7 +55,7 @@ class DeliverTest(unittest.TestCase):
             fh.write(base64.b64encode(self.key).decode())
         with open(os.path.join(cfg, "generated", "current", "routes.json"), "w") as fh:
             json.dump({"routes": {"test.example.org": {"project_id": 7, "project": "smf/test", "profile": "analysis"}}}, fh)
-        self.env = {**os.environ, "MR_CONFIG_DIR": cfg, "MR_DATA_DIR": data}
+        self.env = {**os.environ, "MR_CONFIG_DIR": cfg, "MR_DATA_DIR": data, "MR_NO_SYSLOG": "1"}
         self.spool_dir = os.path.join(data, "receive", "spool")
 
     def tearDown(self):
@@ -85,6 +85,23 @@ class DeliverTest(unittest.TestCase):
     def test_unknown_route_is_tempfail(self):
         self.assertEqual(75, self.deliver("x@other.example").returncode)
         self.assertEqual([], spool.ready_ids(self.spool_dir, "new"))
+
+
+
+class AnalysisConfigTest(unittest.TestCase):
+    def test_reads_encrypted_settings_written_by_php_format(self):
+        from mailrunner_rx import analysis_config
+        key = os.urandom(32)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "analysis.json.enc")
+            with open(path, "wb") as fh:
+                fh.write(crypto.encrypt(key, b'{"projects":{"1":{"spamhaus_dqs_key":"abc"}}}\n', "generated:analysis.json"))
+            self.assertEqual({"1": {"spamhaus_dqs_key": "abc"}}, analysis_config.load(key, path))
+            self.assertEqual({}, analysis_config.load(key, os.path.join(tmp, "missing")))
+
+    def test_blacklistmaster_skips_selftests(self):
+        from mailrunner_rx import blacklistmaster
+        self.assertEqual({"status": "skipped", "reason": "selftest"}, blacklistmaster.check("192.0.2.1", "selftest-abc", "u", "p"))
 
 
 if __name__ == "__main__":
