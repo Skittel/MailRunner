@@ -24,7 +24,7 @@ class Messages extends BaseController
     /** Max page size when the list includes the content (decrypting is per message). */
     private const CONTENT_LIMIT = 100;
 
-    private const LIST_FIELDS = 'id, message_id, spool_id, profile, role, status, received_at, queue_id, mail_from, rcpt, client_ip, helo,
+    public const LIST_FIELDS = 'id, message_id, spool_id, profile, role, status, received_at, queue_id, mail_from, rcpt, client_ip, helo,
         client_asn, client_as_org, client_country, client_city, client_continent, client_carrier, client_is_threat,
         header_from, header_to, subject, date_hdr, attachments, spf_status, dkim_status, analysis_status, analysis_ms,
         analysis_path, raw_path, size, sha256, acked_at, content_deleted_at, delete_reason';
@@ -78,7 +78,7 @@ class Messages extends BaseController
      *
      * @return array{record: mixed, debug: mixed, raw_headers: mixed}
      */
-    private static function content(array $row): array
+    public static function content(array $row): array
     {
         $analysis = $row['analysis_path'] === null ? null : MessageStore::forNode()->analysis($row['spool_id'], $row['analysis_path']);
 
@@ -153,7 +153,7 @@ class Messages extends BaseController
      *
      * @return array<string, mixed>
      */
-    private static function present(array $row): array
+    public static function present(array $row): array
     {
         return [
             'cursor'             => (int) $row['id'],

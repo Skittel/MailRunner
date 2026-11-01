@@ -46,6 +46,46 @@ class CustomerService
     }
 
     /**
+     * Changes name and/or enabled (admin API, CLI later). Disabling a customer disables its projects
+     * on the mail path (unknown recipient), so the mail path configuration is applied again.
+     *
+     * @param array{name?: string, enabled?: bool} $changes
+     *
+     * @return array<string, mixed>
+     */
+    public function update(string $key, array $changes, ChangeContext $ctx): array
+    {
+        $unknown = array_diff(array_keys($changes), ['name', 'enabled']);
+        if ($unknown !== []) {
+            throw new ConfigException('INVALID_SETTING', 'Unknown setting(s): ' . implode(', ', $unknown));
+        }
+
+        return Transaction::run($this->db, function () use ($key, $changes, $ctx): array {
+            $customer = $this->getByKey($key);
+            $row      = [];
+            if (array_key_exists('name', $changes)) {
+                $row['name'] = trim((string) $changes['name']) !== '' ? trim((string) $changes['name']) : $key;
+            }
+            if (array_key_exists('enabled', $changes)) {
+                $row['enabled'] = $changes['enabled'] ? 1 : 0;
+            }
+            if ($row === []) {
+                return $customer;
+            }
+            if ($ctx->source === 'admin') {
+                $row['managed_by'] = 'admin';
+            }
+            $this->db->table('customers')->where('id', $customer['id'])->update($row + ['updated_at' => Time::now()]);
+            $this->journal->append('customer.updated', $ctx, (int) $customer['id'], null, ['customer' => $key, 'changed' => array_keys($row)]);
+            if (array_key_exists('enabled', $row)) {
+                ProjectService::requestApply();
+            }
+
+            return $this->getById((int) $customer['id']);
+        });
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     public function findByKey(string $key): ?array

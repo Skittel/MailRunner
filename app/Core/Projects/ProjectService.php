@@ -131,6 +131,9 @@ class ProjectService
                 throw new ConfigException('INVALID_SETTING', 'role_mail forward needs role_mail_forward_to');
             }
             $row     = $changes;
+            if ($ctx->source === 'admin' && $project['managed_by'] !== 'admin') {
+                $row['managed_by'] = 'admin'; // the admin GUI takes over a project created on the CLI
+            }
             if (array_key_exists('recipient_always_allow', $row)) {
                 $row['recipient_always_allow'] = $row['recipient_always_allow'] === null ? null : json_encode($row['recipient_always_allow']);
             }

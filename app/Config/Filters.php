@@ -35,6 +35,7 @@ class Filters extends BaseFilters
         'pagecache'     => PageCache::class,
         'performance'   => PerformanceMetrics::class,
         'bearer'        => \App\Core\Auth\BearerTokenFilter::class,
+        'admincert'     => \App\Core\Auth\AdminCertFilter::class,
     ];
 
     /**
