@@ -97,8 +97,9 @@ class SmtpSessionImporter
     {
         $base = [
             'session_id' => $session['session_id'],
-            'started_at' => $session['started_at'],
-            'ended_at'   => $session['ended_at'],
+            'started_at'  => $session['started_at'],
+            'ended_at'    => $session['ended_at'],
+            'duration_ms' => $session['duration_ms'] ?? null,
             'client'     => $session['client'],
             'helo'       => $session['helo'],
             'tls'        => $session['tls'],
@@ -110,6 +111,7 @@ class SmtpSessionImporter
                 'project_id'  => null,
                 'details'     => $base + [
                     'end'      => $session['end'],
+                    'tls_ms'   => $session['tls_ms'] ?? null,
                     'commands' => $session['commands'],
                     'warnings' => $session['warnings'] ?? [],
                 ],
@@ -147,6 +149,7 @@ class SmtpSessionImporter
                         'recipients'  => array_map(static fn ($r) => ['rcpt' => $r['rcpt'], 'status' => $r['status'], 'reply' => $r['reply']], $group['recipients']),
                         'result'      => ['status' => $result['status'] ?? 'none', 'reply' => $result['reply'] ?? null],
                         'message_ids' => $project === null ? [] : $messageIds($tx['spool_ids'] ?? [], (int) $project['project_id']),
+                        'timing'      => $tx['timing'] ?? null,
                         'end'         => $session['end'],
                     ],
                 ];

@@ -68,6 +68,7 @@ final class SmtpJournalTest extends CIUnitTestCase
     {
         $s = [
             'session_id' => $id, 'service' => 'smtpd', 'started_at' => '2026-11-01T20:00:00.000000Z', 'ended_at' => '2026-11-01T20:00:01.000000Z',
+            'duration_ms' => 1000, 'tls_ms' => 40,
             'client' => ['ip' => '192.0.2.10', 'port' => 40001, 'name' => 'mx.example.net'], 'helo' => 'mx.example.net',
             'tls' => ['protocol' => 'TLSv1.3', 'cipher' => 'TLS_AES_256_GCM_SHA384'], 'end' => $end, 'commands' => 'ehlo=1 commands=1',
             'warnings' => [], 'transactions' => $transactions,
@@ -111,6 +112,7 @@ final class SmtpJournalTest extends CIUnitTestCase
                 ['rcpt' => 'relay@foreign.example', 'status' => 'rejected', 'reply' => '554 5.7.1 Relay access denied', 'by' => 'postfix'],
             ],
             'result' => ['status' => 'accepted', 'reply' => '250'],
+            'timing' => ['tls_ms' => 40, 'mail_from_ms' => 60, 'data_end_ms' => 200, 'reply_ms' => 950, 'wait_ms' => 750],
         ]]);
         $this->assertSame(['imported' => 2, 'duplicates' => 0, 'failed' => 0], $this->import());
 
@@ -126,6 +128,8 @@ final class SmtpJournalTest extends CIUnitTestCase
         $this->assertSame(['User0001@IN.example.org', 'x@in.example.org'], array_column($own[0]['details']['recipients'], 'rcpt'));
         $this->assertSame('accepted', $own[0]['details']['result']['status']);
         $this->assertSame('192.0.2.10', $own[0]['details']['client']['ip']);
+        $this->assertSame(1000, $own[0]['details']['duration_ms']);
+        $this->assertSame(750, $own[0]['details']['timing']['wait_ms']);
 
         // the other project: its recipient was deferred -> result "none" for its part of the attempt
         $other = $this->journal('other/mail');
@@ -138,6 +142,7 @@ final class SmtpJournalTest extends CIUnitTestCase
         $connection = array_values(array_filter($events, static fn ($e) => $e['event'] === 'smtp.connection'))[0];
         $this->assertSame('unassigned', $connection['scope']);
         $this->assertSame('mx.example.net', $connection['details']['helo']);
+        $this->assertSame(40, $connection['details']['tls_ms']);
 
         $this->setScope('acme/inbound', 'unassigned');
         $events = $this->journal('acme/inbound');

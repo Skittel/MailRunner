@@ -58,6 +58,10 @@ class TrackerTest(unittest.TestCase):
                          [(r["rcpt"], r["status"], r["by"]) for r in tx["recipients"]])
         self.assertTrue(tx["recipients"][0]["reply"].startswith("550 5.1.1"))
         self.assertTrue(s["session_id"].startswith("mrs_"))
+        # lines are 100 ms apart: connect 0, TLS 100, MAIL 300, cleanup reply 800, disconnect 900; milter wait 10 ms
+        self.assertEqual(900, s["duration_ms"])
+        self.assertEqual(100, s["tls_ms"])
+        self.assertEqual({"tls_ms": 100, "mail_from_ms": 300, "data_end_ms": 790, "reply_ms": 800, "wait_ms": 10}, tx["timing"])
         self.assertEqual({}, t.by_client)
         self.assertEqual({}, t.by_qid)
 
@@ -79,6 +83,8 @@ class TrackerTest(unittest.TestCase):
         ])
         s = out[0]
         self.assertEqual([], s["transactions"])
+        self.assertIsNone(s["tls_ms"])
+        self.assertEqual(300, s["duration_ms"])
         self.assertEqual("lost connection after UNKNOWN", s["end"])
         self.assertEqual(["non-SMTP command"], s["warnings"])
         self.assertIsNone(s["helo"])
@@ -116,6 +122,8 @@ class TrackerTest(unittest.TestCase):
         s = out[0]
         self.assertEqual(["a@example.net", "b@example.net"], [t["mail_from"] for t in s["transactions"]])
         self.assertEqual(["accepted", "aborted"], [t["result"]["status"] for t in s["transactions"]])
+        self.assertIsNone(s["transactions"][1]["timing"]["reply_ms"])   # aborted: no reply to end of data
+        self.assertIsNone(s["transactions"][0]["timing"]["wait_ms"])    # no milter "stored" line in this test
         self.assertEqual("lost connection after DATA", s["end"])
 
     def test_idle_session_closed_incomplete_and_resume_cursor(self):

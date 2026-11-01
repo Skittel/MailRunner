@@ -30,7 +30,7 @@ RE_LOST = re.compile(rf"^(?:[0-9A-Za-z]+: )?(?P<what>lost connection|timeout|too
 RE_WARNING = re.compile(rf"^warning: (?P<text>.*?) from {CLIENT}")
 RE_CLEANUP = re.compile(rf"^(?P<qid>[0-9A-Za-z]+): milter-(?P<act>discard|reject|hold): (?P<stage>[A-Z-]+) from {CLIENT}: (?P<rest>.*)$")
 RE_MILTER_SESSION = re.compile(r"^session (?P<ev>helo|mail|rcpt) client=\[(?P<ip>[^\]]*)\]:(?P<port>\d+) (?P<rest>.*)$")
-RE_STORED = re.compile(r"^stored id=(?P<sid>\S+) queue_id=(?P<qid>\S+)")
+RE_STORED = re.compile(r"^stored id=(?P<sid>\S+) queue_id=(?P<qid>\S+)(?:.* ms=(?P<ms>\d+))?")
 RE_KV = re.compile(r"(\w+)=<([^>]*)>|(\w+)=(\S+)")
 
 
@@ -81,6 +81,7 @@ class Session:
         self.client = {"ip": ip, "port": int(port) if port else None, "name": name}
         self.helo = None
         self.tls = None
+        self.tls_at = None
         self.end = None
         self.commands = None
         self.warnings = []
@@ -93,7 +94,8 @@ class Session:
     def transaction(self, mail_from=None, ts=None, new=False):
         if new or not self.transactions:
             self.transactions.append({"started_at": iso(ts or self.last), "mail_from": mail_from, "queue_id": None,
-                                      "recipients": [], "result": None, "spool_ids": []})
+                                      "recipients": [], "result": None, "spool_ids": [],
+                                      "_mail_at": ts or self.last, "_reply_at": None, "_wait_ms": None})
         t = self.transactions[-1]
         if mail_from is not None and t["mail_from"] is None:
             t["mail_from"] = mail_from
@@ -105,17 +107,29 @@ class Session:
                 return
         t["recipients"].append({"rcpt": addr, "status": status, "reply": reply, "by": by})
 
+    def ms(self, ts):
+        return None if ts is None else max(0, round((ts - self.started) * 1000))
+
     def to_dict(self):
+        transactions = []
         for t in self.transactions:
             if t["result"] is None:
                 accepted = any(r["status"] == "accepted" for r in t["recipients"])
                 t["result"] = {"status": "aborted" if accepted else "none", "reply": None}
+            reply_ms = self.ms(t["_reply_at"])
+            wait_ms = t["_wait_ms"] if reply_ms is not None else None
+            t = {k: v for k, v in t.items() if not k.startswith("_")} | {"timing": {
+                "tls_ms": self.ms(self.tls_at), "mail_from_ms": self.ms(t["_mail_at"]),
+                "data_end_ms": None if wait_ms is None else max(0, reply_ms - wait_ms),
+                "reply_ms": reply_ms, "wait_ms": wait_ms}}
+            transactions.append(t)
         return {
             "session_id": self.session_id, "service": self.service,
             "started_at": iso(self.started), "ended_at": iso(self.ended or self.last),
+            "duration_ms": self.ms(self.ended or self.last), "tls_ms": self.ms(self.tls_at),
             "client": self.client, "helo": self.helo, "tls": self.tls,
             "end": self.end or "incomplete", "commands": self.commands,
-            "warnings": self.warnings[:20], "transactions": self.transactions,
+            "warnings": self.warnings[:20], "transactions": transactions,
         }
 
 
@@ -164,6 +178,7 @@ class Tracker:
         m = RE_TLS.match(msg)
         if m:
             s.tls = {"protocol": m["proto"], "cipher": m["cipher"]}
+            s.tls_at = ts
             return
         m = RE_QID_CLIENT.match(msg)
         if m:
@@ -214,6 +229,7 @@ class Tracker:
             s.helo = clean(f["helo"], 255)
         if "to" in f and not any(r["status"] == "accepted" for r in t["recipients"]):
             s.rcpt(t, clean(f["to"], 320), "accepted", "250", "postfix")
+        t["_reply_at"] = ts
         if m["act"] == "discard":
             t["result"] = {"status": "accepted", "reply": "250", "stage": m["stage"]}
         else:
@@ -224,7 +240,10 @@ class Tracker:
         if m:
             s = self.by_qid.get(m["qid"])
             if s is not None:
-                self._tx_by_qid(s, m["qid"])["spool_ids"].append(m["sid"])
+                t = self._tx_by_qid(s, m["qid"])
+                t["spool_ids"].append(m["sid"])
+                if m["ms"]:   # milter time from end of data until stored (cumulative over recipients)
+                    t["_wait_ms"] = max(t["_wait_ms"] or 0, int(m["ms"]))
             return
         m = RE_MILTER_SESSION.match(msg)
         if not m:

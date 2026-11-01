@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MailRunner customer API (receive)
-  version: 0.0.16
+  version: 0.0.17
   description: |
     Pull API of a MailRunner node. A client application collects the messages the node accepted
     for its project. A token belongs to exactly one project and only sees that project's data.
@@ -362,6 +362,7 @@ components:
         session_id: { type: string, example: mrs_c9475f35fbb2d47c03c9 }
         started_at: { type: string, format: date-time }
         ended_at: { type: string, format: date-time }
+        duration_ms: { type: [integer, 'null'], description: 'connect to disconnect' }
         client:
           type: object
           properties:
@@ -381,6 +382,7 @@ components:
         - $ref: '#/components/schemas/SmtpSession'
         - type: object
           properties:
+            tls_ms: { type: [integer, 'null'], description: 'ms after connect until TLS was established' }
             commands: { type: [string, 'null'], description: 'Postfix command statistics, e.g. "ehlo=1 starttls=1 commands=2"' }
             warnings: { type: array, items: { type: string }, example: ['non-SMTP command'] }
 
@@ -406,3 +408,12 @@ components:
                 status: { type: string, enum: [accepted, rejected, tempfail, aborted, none], description: 'accepted = stored (250); none = no data for these recipients' }
                 reply: { type: [string, 'null'] }
             message_ids: { type: array, items: { type: string }, description: 'messages of this project created by the attempt' }
+            timing:
+              type: [object, 'null']
+              description: 'ms after connect (null if the step did not happen); wait_ms = reply_ms - data_end_ms'
+              properties:
+                tls_ms: { type: [integer, 'null'] }
+                mail_from_ms: { type: [integer, 'null'] }
+                data_end_ms: { type: [integer, 'null'], description: 'all data received' }
+                reply_ms: { type: [integer, 'null'], description: 'reply to the data sent (250 / 4xx / 5xx)' }
+                wait_ms: { type: [integer, 'null'], description: 'sender waited for the reply: store + analysis' }

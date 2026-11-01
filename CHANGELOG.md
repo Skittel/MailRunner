@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.17 - 2026-11-01
+- Journal `smtp.attempt` / `smtp.connection`: `duration_ms` (connect to disconnect) and `tls_ms`.
+  `smtp.attempt` also has `timing` (ms after connect): `tls_ms`, `mail_from_ms`, `data_end_ms`, `reply_ms`,
+  and `wait_ms` = time the sender waited for the reply after the data (store + analysis).
+
 ## 0.0.16 - 2026-11-01
 - Self test checks every MX name of the node: node setting `MAILRUNNER_MX_NAMES` (installer option
   `--mx-names="mx.example.net=46 mx4.example.net=4 mx6.example.net=6"`). Per name: address families exactly
