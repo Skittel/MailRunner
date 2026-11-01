@@ -61,39 +61,48 @@ def main():
     cmd = ["journalctl", "--follow", "--output=json", "--no-pager", "SYSLOG_FACILITY=2"]
     cmd += [f"--after-cursor={cursor}"] if cursor else [f"--since={FIRST_START_SINCE}"]
     syslog.syslog(syslog.LOG_INFO, "starting " + ("from saved cursor" if cursor else f"since {FIRST_START_SINCE}"))
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=1, text=True)
+    # unbuffered: select() must see every line that journalctl wrote (no lines hidden in a Python buffer)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=0)
+    fd = proc.stdout.fileno()
     tracker = Tracker()
     tracker.last_cursor = cursor
     last_state = 0.0
-    emitted = 0
+    pending = b""
     while True:
-        ready, _, _ = select.select([proc.stdout], [], [], 1.0)
+        ready, _, _ = select.select([fd], [], [], 1.0)
         finished = []
         if ready:
-            line = proc.stdout.readline()
-            if not line:
+            chunk = os.read(fd, 65536)
+            if not chunk:
                 syslog.syslog(syslog.LOG_ERR, "journalctl ended")
                 return 1
-            try:
-                e = json.loads(line)
-            except ValueError:
-                continue
-            ident = e.get("SYSLOG_IDENTIFIER") or ""
-            cur = e.get("__CURSOR")
-            if wanted(ident) and isinstance(e.get("MESSAGE"), str):
-                ts = int(e.get("__REALTIME_TIMESTAMP", "0")) / 1e6
-                pid = e.get("SYSLOG_PID") or e.get("_PID") or ""
-                finished = tracker.feed(ident, pid, ts, e["MESSAGE"], cur)
-            else:
-                tracker.last_cursor = cur
+            pending += chunk
+            *lines, pending = pending.split(b"\n")
+            for line in lines:
+                finished += handle(tracker, line)
         else:
-            finished = tracker.due(time.time())
+            # caught up and idle: close sessions by wall clock (while reading, entry time is used)
+            finished += tracker.due(time.time())
         for session in finished:
             emit(key, session)
-            emitted += 1
         if time.monotonic() - last_state >= STATE_EVERY_SECONDS or finished:
             save_state(tracker.resume_cursor())
             last_state = time.monotonic()
+
+
+def handle(tracker, line):
+    try:
+        e = json.loads(line)
+    except ValueError:
+        return []
+    ident = e.get("SYSLOG_IDENTIFIER") or ""
+    cur = e.get("__CURSOR")
+    if not (wanted(ident) and isinstance(e.get("MESSAGE"), str)):
+        tracker.last_cursor = cur
+        return []
+    ts = int(e.get("__REALTIME_TIMESTAMP", "0")) / 1e6
+    pid = e.get("SYSLOG_PID") or e.get("_PID") or ""
+    return tracker.feed(ident, pid, ts, e["MESSAGE"], cur)
 
 
 if __name__ == "__main__":

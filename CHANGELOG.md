@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.13 - 2026-11-01
+- mr-smtplog: read journalctl unbuffered. With a buffered pipe, select() did not report lines already
+  read into the Python buffer, so the last line of a session (disconnect) waited for the next log line.
+  Wall-clock closing of sessions only when idle (during a backlog the entry time is used).
+
 ## 0.0.12 - 2026-11-01
 - Journal of delivery attempts: new service `mailrunner-smtplog` (`mr-smtplog`) follows the mail log
   (Postfix smtpd/cleanup + milter session lines), builds one record per SMTP session and hands it to
