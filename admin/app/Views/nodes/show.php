@@ -1,8 +1,8 @@
 <?= $this->extend('layouts/main') ?>
 <?php $this->setVar('title', $node['name']); $this->setVar('pretitle', 'Node · ' . esc($node['node_key'])) ?>
 <?= $this->section('actions') ?>
-<form method="post" action="/nodes/<?= $node['id'] ?>/import" class="d-inline"><?= csrf_field() ?>
-    <button class="btn btn-outline-secondary" title="Kunden und Projekte, die nur auf der Node existieren, hier übernehmen">Konfiguration übernehmen</button></form>
+<?php if (can_write()): ?><form method="post" action="/nodes/<?= $node['id'] ?>/import" class="d-inline"><?= csrf_field() ?>
+    <button class="btn btn-outline-secondary" title="Kunden und Projekte, die nur auf der Node existieren, hier übernehmen">Konfiguration übernehmen</button></form><?php endif ?>
 <?= $this->endSection() ?>
 <?= $this->section('content') ?>
 <div class="row row-cards">

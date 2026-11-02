@@ -7,16 +7,19 @@
     <title><?= esc($title ?? 'MailRunner Admin') ?> · MailRunner Admin</title>
     <link rel="stylesheet" href="/assets/vendor/tabler/tabler.min.css">
     <link rel="stylesheet" href="/assets/admin.css">
+    <link rel="icon" href="/favicon.ico" sizes="any"><link rel="apple-touch-icon" href="/assets/img/mailrunner-icon.png">
+    <meta name="theme-color" content="#16283A">
 </head>
 <body hx-headers='{"<?= esc(config('Security')->headerName, 'attr') ?>": "<?= csrf_hash() ?>"}'>
 <div class="page">
     <header class="navbar navbar-expand-md d-print-none">
         <div class="container-xl">
             <a href="/" class="navbar-brand navbar-brand-autodark pe-0 pe-md-3">
-                <span class="brand-mark">MR</span> MailRunner <span class="text-secondary fw-normal ms-1">Admin</span>
+                <img src="/assets/img/mailrunner-icon.png" alt="" class="brand-icon"> MailRunner <span class="text-secondary fw-normal ms-1">Admin</span>
             </a>
             <div class="navbar-nav flex-row order-md-last">
-                <div class="nav-item text-secondary small me-3 d-none d-md-block"><?= esc(session('user_name')) ?></div>
+                <div class="nav-item text-secondary small me-3 d-none d-md-block"><?= esc(session('user_name')) ?>
+                    <?= can_write() ? '<span class="badge bg-teal-lt access-badge ms-1">Schreiben</span>' : '<span class="badge bg-secondary-lt access-badge ms-1" title="Nur Lesezugriff">Lesen</span>' ?></div>
                 <a class="btn btn-sm btn-outline-secondary" href="/auth/logout">Abmelden</a>
             </div>
         </div>

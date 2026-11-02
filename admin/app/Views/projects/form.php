@@ -11,7 +11,7 @@ $fb = static fn ($k) => isset($errors[$k]) ? '<div class="invalid-feedback">' . 
 <?php $this->setVar('title', $isNew ? 'Projekt anlegen' : $project['name']);
 $this->setVar('pretitle', '<a href="/customers/' . $customer['id'] . '">' . esc($customer['name']) . '</a>' . ($isNew ? '' : ' · <span class="mono">' . esc($customer['customer_key'] . '/' . $project['project_key']) . '</span>')) ?>
 <?php if (! $isNew): ?><?= $this->section('actions') ?>
-<form method="post" action="/projects/<?= $project['id'] ?>/push" class="d-inline"><?= csrf_field() ?><button class="btn btn-outline-secondary">Erneut übertragen</button></form>
+<?php if (can_write()): ?><form method="post" action="/projects/<?= $project['id'] ?>/push" class="d-inline"><?= csrf_field() ?><button class="btn btn-outline-secondary">Erneut übertragen</button></form><?php endif ?>
 <?= $this->endSection() ?><?php endif ?>
 <?= $this->section('content') ?>
 <?php if (! $isNew): ?>
@@ -22,7 +22,7 @@ $this->setVar('pretitle', '<a href="/customers/' . $customer['id'] . '">' . esc(
 <div class="row row-cards">
 <div class="col-lg-8">
 <form method="post" action="<?= $isNew ? '/customers/' . $customer['id'] . '/projects' : '/projects/' . $project['id'] ?>" class="card"><?= csrf_field() ?>
-    <div class="card-body">
+    <fieldset class="card-body"<?= can_write() ? '' : ' disabled' ?>>
         <div class="row">
             <?php if ($isNew): ?>
             <div class="col-md-4 mb-3"><label class="form-label required">Schlüssel</label><input name="project_key" class="form-control<?= $err('project_key') ?>" value="<?= esc($project['project_key'] ?? '') ?>" placeholder="inbox"><?= $fb('project_key') ?></div>
@@ -55,8 +55,8 @@ $this->setVar('pretitle', '<a href="/customers/' . $customer['id'] . '">' . esc(
             <div class="col-md-4 mb-3"><label class="form-label">Weiterleiten an</label><input type="email" name="role_mail_forward_to" class="form-control<?= $err('role_mail_forward_to') ?>" value="<?= esc($s['role_mail_forward_to'] ?? '') ?>"><?= $fb('role_mail_forward_to') ?></div>
         </div>
         <label class="form-check form-switch"><input class="form-check-input" type="checkbox" name="enabled" value="1"<?= ($project['enabled'] ?? 1) ? ' checked' : '' ?>><span class="form-check-label">aktiv</span></label>
-    </div>
-    <div class="card-footer text-end"><a href="/customers/<?= $customer['id'] ?>" class="btn btn-link">Abbrechen</a><button class="btn btn-primary"><?= $isNew ? 'Anlegen und übertragen' : 'Speichern und übertragen' ?></button></div>
+    </fieldset>
+    <?php if (can_write()): ?><div class="card-footer text-end"><a href="/customers/<?= $customer['id'] ?>" class="btn btn-link">Abbrechen</a><button class="btn btn-primary"><?= $isNew ? 'Anlegen und übertragen' : 'Speichern und übertragen' ?></button></div><?php endif ?>
 </form>
 </div>
 <?php if (! $isNew): ?>

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1 - 2026-11-02
+- Admin: access through Entra security groups instead of the app role. `ENTRA_GROUP_RW` may change
+  configuration, `ENTRA_GROUP_RO` only reads (pages, journal, postmaster/abuse mails). Forms are read-only
+  and write requests answer 403 for RO users. The app registration must emit the groups claim.
+- Admin: MailRunner logo, favicon and brand colours.
+
 ## 0.1.0 - 2026-11-01
 - **MailRunner Admin** (decision E-19), a separate application in `admin/` with its own database:
   - CodeIgniter 4, Tabler (Bootstrap 5), htmx.

@@ -1,6 +1,6 @@
 <?= $this->extend('layouts/main') ?>
 <?php $this->setVar('title', 'Kunden') ?>
-<?= $this->section('actions') ?><a href="/customers/new" class="btn btn-primary">Kunde anlegen</a><?= $this->endSection() ?>
+<?= $this->section('actions') ?><?php if (can_write()): ?><a href="/customers/new" class="btn btn-primary">Kunde anlegen</a><?php endif ?><?= $this->endSection() ?>
 <?= $this->section('content') ?>
 <div class="card"><div class="table-responsive"><table class="table table-vcenter card-table">
     <thead><tr><th>Kunde</th><th>Schlüssel</th><th>Projekte</th><th>Status</th></tr></thead><tbody>

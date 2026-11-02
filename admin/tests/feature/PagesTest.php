@@ -22,7 +22,7 @@ final class PagesTest extends CIUnitTestCase
     protected $refresh     = true;
     protected $namespace   = 'App';
 
-    private array $admin = ['user_id' => 1, 'user_name' => 'Test Admin', 'user_email' => 'admin@example.org', 'is_admin' => true,
+    private array $admin = ['user_id' => 1, 'user_name' => 'Test Admin', 'user_email' => 'admin@example.org', 'is_admin' => true, 'access' => 'rw',
         'csrf_test_name' => 'testtoken0123456789abcdef'];
 
     /** POST as administrator with the session CSRF token. */
@@ -109,5 +109,35 @@ final class PagesTest extends CIUnitTestCase
         $row = $this->db->table('projects')->where('project_key', 'support')->get()->getRowArray();
         $this->assertSame('connections', json_decode($row['settings'], true)['journal_scope']);
         $this->assertNotNull($row['sync_error']); // node unreachable in tests
+    }
+
+    public function testReadOnlyUserSeesButCannotChange(): void
+    {
+        $ro = ['access' => 'ro'] + $this->admin;
+        $r  = $this->withSession($ro)->get('projects/1');
+        $r->assertStatus(200);
+        $r->assertSee('in.example.org');
+        $r->assertSee('disabled');
+        $r->assertDontSee('Speichern und übertragen');
+        $r->assertDontSee('Erneut übertragen');
+        $r->assertSee('Lesen');
+        $this->withSession($ro)->get('customers')->assertDontSee('Kunde anlegen');
+        $this->withSession($ro)->get('nodes/1')->assertDontSee('Konfiguration übernehmen');
+        $this->withSession($ro)->get('projects/1/tokens')->assertDontSee('Sperren');
+
+        $r = $this->withSession($ro)->post('customers', ['customer_key' => 'ro-corp', 'name' => 'RO', 'csrf_test_name' => 'testtoken0123456789abcdef']);
+        $r->assertStatus(403);
+        $this->dontSeeInDatabase('customers', ['customer_key' => 'ro-corp']);
+    }
+
+    public function testAccessFromGroups(): void
+    {
+        $c = config('Admin');
+        $c->groupsRw = ['aaaaaaaa-0000-0000-0000-000000000001'];
+        $c->groupsRo = ['bbbbbbbb-0000-0000-0000-000000000002'];
+        $this->assertSame('rw', $c->accessFor(['AAAAAAAA-0000-0000-0000-000000000001', 'bbbbbbbb-0000-0000-0000-000000000002']));
+        $this->assertSame('ro', $c->accessFor(['bbbbbbbb-0000-0000-0000-000000000002']));
+        $this->assertNull($c->accessFor(['cccccccc-0000-0000-0000-000000000003']));
+        $this->assertNull($c->accessFor([]));
     }
 }

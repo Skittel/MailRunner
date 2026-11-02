@@ -6,13 +6,17 @@ use CodeIgniter\Filters\FilterInterface;
 use CodeIgniter\HTTP\RequestInterface;
 use CodeIgniter\HTTP\ResponseInterface;
 
-/** Every page except /auth/* needs a signed-in administrator (Entra app role). */
+/** Every page except /auth/* needs a signed-in administrator; changes (non-GET) need the RW group. */
 class AdminAuth implements FilterInterface
 {
     public function before(RequestInterface $request, $arguments = null)
     {
         if (session('user_id') && session('is_admin')) {
-            return null;
+            if (in_array(strtoupper($request->getMethod()), ['GET', 'HEAD'], true) || can_write()) {
+                return null;
+            }
+
+            return service('response')->setStatusCode(403)->setBody('Nur Lesezugriff: Änderungen erfordern die Schreibgruppe.');
         }
         if ($request->hasHeader('HX-Request')) {
             return service('response')->setStatusCode(401)->setHeader('HX-Redirect', site_url('auth/login'));

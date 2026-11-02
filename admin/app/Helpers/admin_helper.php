@@ -47,6 +47,12 @@ if (! function_exists('dt')) {
         return '<span class="status-dot status-dot-animated ' . $cls . ' me-2"></span>';
     }
 
+    /** True if the signed-in user is in an RW group (may change configuration). */
+    function can_write(): bool
+    {
+        return session('access') === 'rw';
+    }
+
     function bytes(int $n): string
     {
         return $n >= 1048576 ? round($n / 1048576, 1) . ' MB' : ($n >= 1024 ? round($n / 1024) . ' KB' : $n . ' B');

@@ -1,6 +1,6 @@
 <?= $this->extend('layouts/main') ?>
 <?php $this->setVar('title', 'Nodes') ?>
-<?= $this->section('actions') ?><a href="/nodes/new" class="btn btn-primary">Node anlegen</a><?= $this->endSection() ?>
+<?= $this->section('actions') ?><?php if (can_write()): ?><a href="/nodes/new" class="btn btn-primary">Node anlegen</a><?php endif ?><?= $this->endSection() ?>
 <?= $this->section('content') ?>
 <div class="card"><div class="table-responsive"><table class="table table-vcenter card-table">
     <thead><tr><th>Node</th><th>Adresse</th><th>Zustand</th><th>Version</th><th>Selbsttest</th><th>Abgefragt</th></tr></thead>

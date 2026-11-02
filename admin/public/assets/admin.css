@@ -1,6 +1,19 @@
 /* MailRunner Admin - small additions to Tabler */
-.brand-mark { display: inline-flex; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; border-radius: .5rem;
-  background: var(--tblr-primary); color: #fff; font-weight: 700; font-size: .8rem; margin-right: .5rem; }
+/* Brand colours from the MailRunner logo: navy #16283A, teal #2ACBBB, coral #FF795F */
+:root, [data-bs-theme=light] {
+  --mr-navy: #16283A; --mr-teal: #2ACBBB; --mr-coral: #FF795F;
+  --tblr-primary: #16283A; --tblr-primary-rgb: 22, 40, 58; --tblr-primary-fg: #fff;
+  --tblr-primary-darken: #0f1c29; --tblr-primary-lt: #e8edf2; --tblr-primary-lt-rgb: 232, 237, 242;
+  --tblr-link-color: #1f6f8b; --tblr-link-color-rgb: 31, 111, 139; --tblr-link-hover-color: #16283A;
+}
+.btn-primary { --tblr-btn-bg: var(--mr-navy); --tblr-btn-border-color: var(--mr-navy); --tblr-btn-hover-bg: #0f1c29;
+  --tblr-btn-hover-border-color: #0f1c29; --tblr-btn-active-bg: #0b1520; --tblr-btn-color: #fff; }
+.brand-icon { width: 2rem; height: 2rem; margin-right: .5rem; border-radius: .45rem; }
+.navbar-brand { color: var(--mr-navy); font-weight: 700; letter-spacing: .01em; }
+.navbar .nav-item.active .nav-link, .navbar .nav-link.active { color: var(--mr-navy); }
+.navbar-expand-md .navbar .nav-item.active::after { border-color: var(--mr-teal); border-bottom-width: 3px; }
+.login-logo { width: 100%; max-width: 320px; height: auto; }
+.access-badge { font-weight: 600; }
 .mail-frame { width: 100%; min-height: 420px; border: 1px solid var(--tblr-border-color); border-radius: var(--tblr-border-radius); background: #fff; }
 .mail-text { white-space: pre-wrap; font-family: var(--tblr-font-monospace); font-size: .85rem; max-height: 60vh; overflow: auto; }
 .htmx-indicator { display: none; }

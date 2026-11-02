@@ -5,8 +5,10 @@
         <h3 class="card-title"><?= status_dot($h['level']) ?><a href="/nodes/<?= $n['id'] ?>" class="text-reset"><?= esc($n['name']) ?></a>
             <span class="text-secondary small ms-2 mono"><?= esc($n['node_key']) ?></span></h3>
         <div class="card-actions">
+<?php if (can_write()): ?>
             <button class="btn btn-sm btn-ghost-secondary" hx-post="/nodes/<?= $n['id'] ?>/poll<?= $detail ? '?detail=1' : '' ?>" hx-target="#node-<?= $n['id'] ?>" hx-swap="outerHTML">
                 <span class="htmx-indicator spinner-border spinner-border-sm me-1"></span>Aktualisieren</button>
+            <?php endif ?>
         </div>
     </div>
     <div class="card-body">

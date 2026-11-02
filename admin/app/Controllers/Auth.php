@@ -7,7 +7,7 @@ use App\Libraries\Clock;
 use App\Libraries\EntraAuth;
 use Throwable;
 
-/** Sign-in with Entra ID; administrators need the app role (Config\Admin::$adminRole). */
+/** Sign-in with Entra ID; access comes from Entra group membership (Config\Admin::$groupsRw / $groupsRo). */
 class Auth extends BaseController
 {
     private function entra(): EntraAuth
@@ -55,12 +55,14 @@ class Auth extends BaseController
             return view('auth/message', ['title' => 'Anmeldung fehlgeschlagen', 'text' => 'Das Anmeldetoken konnte nicht geprüft werden.']);
         }
 
-        $roles   = array_values(array_map('strval', (array) ($claims['roles'] ?? [])));
-        $isAdmin = in_array(config('Admin')->adminRole, $roles, true);
+        $groups = array_values(array_map('strval', (array) ($claims['groups'] ?? [])));
+        // More than ~200 groups: Entra omits the claim and only sends an overage marker.
+        $overage = isset(((array) ($claims['_claim_names'] ?? []))['groups']);
+        $access  = config('Admin')->accessFor($groups);
         $db      = db_connect();
         $now     = Clock::now();
         $row     = ['name' => (string) ($claims['name'] ?? $claims['preferred_username'] ?? 'unknown'),
-            'email' => (string) ($claims['email'] ?? $claims['preferred_username'] ?? ''), 'roles' => json_encode($roles), 'last_login_at' => $now];
+            'email' => (string) ($claims['email'] ?? $claims['preferred_username'] ?? ''), 'roles' => json_encode($access === null ? [] : [$access]), 'last_login_at' => $now];
         $user = $db->table('users')->where('tenant_id', $claims['tid'])->where('entra_oid', $claims['oid'])->get()->getRowArray();
         if ($user === null) {
             $db->table('users')->insert($row + ['tenant_id' => $claims['tid'], 'entra_oid' => $claims['oid'], 'created_at' => $now]);
@@ -69,14 +71,16 @@ class Auth extends BaseController
             $db->table('users')->where('id', $user['id'])->update($row);
             $userId = (int) $user['id'];
         }
-        if (! $isAdmin) {
-            Audit::log('auth.denied', $row['email'], ['reason' => 'missing app role']);
+        if ($access === null) {
+            Audit::log('auth.denied', $row['email'], ['reason' => $overage ? 'group overage' : 'no admin group']);
 
-            return view('auth/message', ['title' => 'Kein Zugriff', 'text' => 'Ihrem Konto fehlt die Rolle „' . config('Admin')->adminRole . '“.']);
+            return view('auth/message', ['title' => 'Kein Zugriff', 'text' => $overage
+                ? 'Ihr Konto ist in zu vielen Gruppen; Entra liefert die Gruppen nicht im Token. Bitte im Token nur die der Anwendung zugewiesenen Gruppen ausgeben.'
+                : 'Ihr Konto ist in keiner der MailRunner-Admin-Gruppen (Lesen oder Schreiben).']);
         }
         session()->regenerate(true);
-        session()->set(['user_id' => $userId, 'user_name' => $row['name'], 'user_email' => $row['email'], 'is_admin' => true]);
-        Audit::log('auth.login', $row['email']);
+        session()->set(['user_id' => $userId, 'user_name' => $row['name'], 'user_email' => $row['email'], 'is_admin' => true, 'access' => $access]);
+        Audit::log('auth.login', $row['email'], ['access' => $access]);
         $to = session('after_login') ?: site_url('/');
         session()->remove('after_login');
 

@@ -10,7 +10,7 @@ use RuntimeException;
 
 /**
  * Sign-in with Entra ID (OpenID Connect, authorization code flow with PKCE).
- * The ID token is verified against the tenant's signing keys (JWKS); administrators need the app role.
+ * The ID token is verified against the tenant's signing keys (JWKS); access comes from the groups claim (Config\Admin::accessFor).
  */
 class EntraAuth
 {

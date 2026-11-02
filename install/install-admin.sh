@@ -5,7 +5,8 @@
 #
 # Needs: a Let's Encrypt certificate for --hostname (certbot certonly --webroot -w /var/www/acme -d <host>),
 # PHP/MariaDB/nginx as installed by install.sh. Afterwards:
-#   - Entra ID values in /etc/mailrunner-admin/admin.env (ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET)
+#   - Entra ID values in /etc/mailrunner-admin/admin.env (ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET,
+#     ENTRA_GROUP_RW, ENTRA_GROUP_RO)
 #   - every node: install.sh ... --admin-ca=/etc/mailrunner-admin/mtls/ca.pem (copy the file to remote nodes)
 set -euo pipefail
 
@@ -59,11 +60,13 @@ database.default.password = ${DB_PASS}
 database.default.DBDriver = MySQLi
 session.savePath = ${DATA}/writable/session
 
-# Entra ID app registration (redirect URI https://${HOST}/auth/callback, app role ADMIN_ROLE)
+# Entra ID app registration (redirect URI https://${HOST}/auth/callback, token configuration: groups claim)
+# Access: object ids of the Entra security groups, comma-separated. RW = change, RO = read only.
 ENTRA_TENANT_ID =
 ENTRA_CLIENT_ID =
 ENTRA_CLIENT_SECRET =
-ADMIN_ROLE = MailRunner.Admin
+ENTRA_GROUP_RW =
+ENTRA_GROUP_RO =
 ENV
     chown root:mailrunner-admin "$CONF/admin.env"
     chmod 0640 "$CONF/admin.env"
@@ -130,5 +133,5 @@ ls -1t /opt/mailrunner-admin/releases | tail -n +4 | while read -r old; do
     rm -rf -- "/opt/mailrunner-admin/releases/${old:?}"
 done
 
-grep -q '^ENTRA_CLIENT_SECRET = .\+' "$CONF/admin.env" || echo "NOTE: Entra ID not configured yet - fill in ENTRA_* in $CONF/admin.env"
+grep -Eq '^ENTRA_CLIENT_SECRET *= *[^ ]' "$CONF/admin.env" || echo "NOTE: Entra ID not configured yet - fill in ENTRA_* in $CONF/admin.env"
 echo "Installed MailRunner Admin $VERSION as $REL: https://$HOST/  (node trust: --admin-ca=$CONF/mtls/ca.pem)"
