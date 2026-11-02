@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.4 - 2026-11-02
+- `mr:secrets:scan`: searches every text column of the node database and the log/data files
+  (without the encrypted mail store and sessions) for secret values from `/etc/mailrunner/*.env` and the
+  node key. Prints names and locations only, never values. Exit 1 on findings.
+- Self test: new check `base.secret_leak` (same scan) - a leak makes the self test fail.
+
 ## 0.1.3 - 2026-11-02
 - Admin: URLs use random public ids (`xxxx-xxxx`) for nodes, customers and projects instead of the
   numeric database ids (migration `PublicIds` backfills existing rows). Numeric ids give 404.

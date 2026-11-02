@@ -2,6 +2,7 @@
 
 namespace App\Commands;
 
+use App\Core\Node\SecretScan;
 use App\Core\Node\SelfTest;
 
 /**
@@ -24,7 +25,8 @@ class SelfTestCommand extends MrCommand
         if ($hostname === '') {
             throw new \RuntimeException('app.baseURL has no host name');
         }
-        $selftest = new SelfTest(db_connect(), service('journalWriter'), ROOTPATH . 'mailpath/receive/bin/mr-selftest', $config->dataDir . '/selftest');
+        $selftest = new SelfTest(db_connect(), service('journalWriter'), ROOTPATH . 'mailpath/receive/bin/mr-selftest', $config->dataDir . '/selftest',
+            SecretScan::forNode(db_connect()));
         $result   = $selftest->run($hostname, $this->option('base-only') !== null, $config->mxNames);
 
         if ($this->json()) {

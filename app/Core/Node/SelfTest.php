@@ -20,7 +20,31 @@ class SelfTest
         private readonly JournalWriter $journal,
         private readonly string $script,
         private readonly string $outDir,
+        private readonly ?SecretScan $secretScan = null,
     ) {
+    }
+
+    /**
+     * Adds a check computed in PHP to the result of mr-selftest and updates status and counters.
+     *
+     * @param array<string, mixed> $result
+     * @param array<string, mixed> $check
+     *
+     * @return array<string, mixed>
+     */
+    public static function withCheck(array $result, array $check): array
+    {
+        $result['checks'][] = $check;
+        if ($check['status'] === 'ok') {
+            $result['ok'] = ($result['ok'] ?? 0) + 1;
+        } elseif ($check['status'] === 'fail') {
+            $result['failed'][] = $check['name'];
+            $result['status']   = 'fail';
+        } elseif ($check['status'] === 'warn') {
+            $result['warnings'][] = $check['name'];
+        }
+
+        return $result;
     }
 
     /**
@@ -47,6 +71,9 @@ class SelfTest
             if (! is_array($result)) {
                 $result = ['status' => 'error', 'error' => 'exit ' . $code . ': ' . substr(trim((string) $err), -300)];
             }
+        }
+        if (isset($result['checks']) && $this->secretScan !== null) {
+            $result = self::withCheck($result, $this->secretScan->check());
         }
         $this->record($result);
 
