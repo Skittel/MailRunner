@@ -17,7 +17,7 @@ class Admin extends BaseConfig
     /**
      * Entra security groups (object ids, comma-separated) that may sign in. Members of a RW group may change
      * configuration; members of a RO group only read (including postmaster/abuse mails). RW wins if a user is in both.
-     * The app registration must emit the groups claim (Token configuration -> Add groups claim -> Security groups).
+     * Membership is checked at sign-in via Microsoft Graph (transitive; delegated permission User.Read only).
      *
      * @var list<string>
      */

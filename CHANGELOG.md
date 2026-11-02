@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 - 2026-11-02
+- Admin: group membership is checked at sign-in with Microsoft Graph (`POST /me/checkMemberGroups`,
+  transitive, delegated permission `User.Read` only). No groups claim / token configuration needed.
+  A failed check denies the sign-in.
+
 ## 0.1.1 - 2026-11-02
 - Admin: access through Entra security groups instead of the app role. `ENTRA_GROUP_RW` may change
   configuration, `ENTRA_GROUP_RO` only reads (pages, journal, postmaster/abuse mails). Forms are read-only

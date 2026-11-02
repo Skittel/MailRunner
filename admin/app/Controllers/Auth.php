@@ -7,7 +7,7 @@ use App\Libraries\Clock;
 use App\Libraries\EntraAuth;
 use Throwable;
 
-/** Sign-in with Entra ID; access comes from Entra group membership (Config\Admin::$groupsRw / $groupsRo). */
+/** Sign-in with Entra ID; access comes from Entra group membership (Graph check at sign-in) (Config\Admin::$groupsRw / $groupsRo). */
 class Auth extends BaseController
 {
     private function entra(): EntraAuth
@@ -48,17 +48,17 @@ class Auth extends BaseController
         }
 
         try {
-            $claims = $this->entra()->finish((string) $this->request->getGet('code'), $this->redirectUri(), $oidc['verifier'], $oidc['nonce']);
+            $entra  = $this->entra();
+            $result = $entra->finish((string) $this->request->getGet('code'), $this->redirectUri(), $oidc['verifier'], $oidc['nonce']);
+            $claims = $result['claims'];
+            $cfg    = config('Admin');
+            $access = $cfg->accessFor($entra->memberGroups($result['access_token'], [...$cfg->groupsRw, ...$cfg->groupsRo]));
         } catch (Throwable $e) {
             log_message('error', 'Entra sign-in failed: {msg}', ['msg' => $e->getMessage()]);
 
-            return view('auth/message', ['title' => 'Anmeldung fehlgeschlagen', 'text' => 'Das Anmeldetoken konnte nicht geprüft werden.']);
+            return view('auth/message', ['title' => 'Anmeldung fehlgeschlagen', 'text' => 'Anmeldung oder Gruppenprüfung bei Microsoft ist fehlgeschlagen.']);
         }
 
-        $groups = array_values(array_map('strval', (array) ($claims['groups'] ?? [])));
-        // More than ~200 groups: Entra omits the claim and only sends an overage marker.
-        $overage = isset(((array) ($claims['_claim_names'] ?? []))['groups']);
-        $access  = config('Admin')->accessFor($groups);
         $db      = db_connect();
         $now     = Clock::now();
         $row     = ['name' => (string) ($claims['name'] ?? $claims['preferred_username'] ?? 'unknown'),
@@ -72,11 +72,9 @@ class Auth extends BaseController
             $userId = (int) $user['id'];
         }
         if ($access === null) {
-            Audit::log('auth.denied', $row['email'], ['reason' => $overage ? 'group overage' : 'no admin group']);
+            Audit::log('auth.denied', $row['email'], ['reason' => 'no admin group']);
 
-            return view('auth/message', ['title' => 'Kein Zugriff', 'text' => $overage
-                ? 'Ihr Konto ist in zu vielen Gruppen; Entra liefert die Gruppen nicht im Token. Bitte im Token nur die der Anwendung zugewiesenen Gruppen ausgeben.'
-                : 'Ihr Konto ist in keiner der MailRunner-Admin-Gruppen (Lesen oder Schreiben).']);
+            return view('auth/message', ['title' => 'Kein Zugriff', 'text' => 'Ihr Konto ist in keiner der MailRunner-Admin-Gruppen (Lesen oder Schreiben).']);
         }
         session()->regenerate(true);
         session()->set(['user_id' => $userId, 'user_name' => $row['name'], 'user_email' => $row['email'], 'is_admin' => true, 'access' => $access]);

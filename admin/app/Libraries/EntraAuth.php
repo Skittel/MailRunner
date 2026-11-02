@@ -10,10 +10,14 @@ use RuntimeException;
 
 /**
  * Sign-in with Entra ID (OpenID Connect, authorization code flow with PKCE).
- * The ID token is verified against the tenant's signing keys (JWKS); access comes from the groups claim (Config\Admin::accessFor).
+ * The ID token is verified against the tenant's signing keys (JWKS); access comes from the
+ * membership in the configured groups, checked at sign-in via Microsoft Graph (POST /me/checkMemberGroups,
+ * transitive, needs only the delegated permission User.Read).
  */
 class EntraAuth
 {
+    private const SCOPE = 'openid profile email User.Read';
+
     public function __construct(private readonly Admin $config, private readonly CURLRequest $http)
     {
     }
@@ -41,7 +45,7 @@ class EntraAuth
             'response_type'         => 'code',
             'redirect_uri'          => $redirectUri,
             'response_mode'         => 'query',
-            'scope'                 => 'openid profile email',
+            'scope'                 => self::SCOPE,
             'state'                 => $state,
             'nonce'                 => $nonce,
             'code_challenge'        => rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '='),
@@ -52,9 +56,9 @@ class EntraAuth
     }
 
     /**
-     * Exchanges the code and returns the verified ID token claims.
+     * Exchanges the code; returns the verified ID token claims and the Graph access token.
      *
-     * @return array<string, mixed>
+     * @return array{claims: array<string, mixed>, access_token: string}
      */
     public function finish(string $code, string $redirectUri, string $verifier, string $nonce): array
     {
@@ -66,7 +70,7 @@ class EntraAuth
                 'code'          => $code,
                 'redirect_uri'  => $redirectUri,
                 'code_verifier' => $verifier,
-                'scope'         => 'openid profile email',
+                'scope'         => self::SCOPE,
             ],
             'http_errors' => false,
             'timeout'     => 15,
@@ -76,7 +80,40 @@ class EntraAuth
             throw new RuntimeException('Token request failed: ' . ($data['error'] ?? 'HTTP ' . $resp->getStatusCode()));
         }
 
-        return $this->verify((string) $data['id_token'], $nonce);
+        return ['claims' => $this->verify((string) $data['id_token'], $nonce), 'access_token' => (string) ($data['access_token'] ?? '')];
+    }
+
+    /**
+     * Returns those of $groupIds the signed-in user is a member of (transitive). Max. 20 ids per Graph call.
+     *
+     * @param list<string> $groupIds
+     *
+     * @return list<string>
+     */
+    public function memberGroups(string $accessToken, array $groupIds): array
+    {
+        if ($groupIds === []) {
+            return [];
+        }
+        if ($accessToken === '') {
+            throw new RuntimeException('No access token for Microsoft Graph');
+        }
+        $found = [];
+        foreach (array_chunk(array_values(array_unique($groupIds)), 20) as $chunk) {
+            $resp = $this->http->post('https://graph.microsoft.com/v1.0/me/checkMemberGroups', [
+                'headers'     => ['Authorization' => 'Bearer ' . $accessToken, 'Content-Type' => 'application/json'],
+                'body'        => json_encode(['groupIds' => $chunk]),
+                'http_errors' => false,
+                'timeout'     => 15,
+            ]);
+            $data = json_decode((string) $resp->getBody(), true) ?: [];
+            if ($resp->getStatusCode() !== 200 || ! isset($data['value']) || ! is_array($data['value'])) {
+                throw new RuntimeException('Group check failed: ' . ($data['error']['code'] ?? 'HTTP ' . $resp->getStatusCode()));
+            }
+            array_push($found, ...array_map('strval', $data['value']));
+        }
+
+        return $found;
     }
 
     /**

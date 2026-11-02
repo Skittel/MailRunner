@@ -60,7 +60,7 @@ database.default.password = ${DB_PASS}
 database.default.DBDriver = MySQLi
 session.savePath = ${DATA}/writable/session
 
-# Entra ID app registration (redirect URI https://${HOST}/auth/callback, token configuration: groups claim)
+# Entra ID app registration (redirect URI https://${HOST}/auth/callback, API permission Microsoft Graph User.Read (default))
 # Access: object ids of the Entra security groups, comma-separated. RW = change, RO = read only.
 ENTRA_TENANT_ID =
 ENTRA_CLIENT_ID =
