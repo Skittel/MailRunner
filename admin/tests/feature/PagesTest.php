@@ -145,6 +145,18 @@ final class PagesTest extends CIUnitTestCase
         $this->assertMatchesRegularExpression('/^[0-9a-z]{4}-[0-9a-z]{4}$/', \App\Libraries\PublicId::generate('projects'));
     }
 
+    public function testRoleMailsSelftestSwitchAndEmptyState(): void
+    {
+        $r = $this->withSession($this->admin)->get('role-mails');
+        $r->assertSee('Selbsttests anzeigen');
+        $r->assertDontSee(' checked hx-get');
+        $r->assertSee('/role-mails/node/n0de-0001"');
+        $r = $this->withSession($this->admin)->get('role-mails?selftests=1');
+        $r->assertSee('/role-mails/node/n0de-0001?selftests=1');
+        $this->db->table('nodes')->update(['enabled' => 0]);
+        $this->withSession($this->admin)->get('role-mails')->assertSee('Keine Datensätze');
+    }
+
     public function testAccessFromGroups(): void
     {
         $c = config('Admin');

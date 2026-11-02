@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.5 - 2026-11-02
+- Admin, postmaster & abuse: self test mails (customer `system`) are hidden by default; switch
+  "Selbsttests anzeigen" at the top. Empty lists show a centred "Keine Datensätze".
+- Node admin API: `GET /admin/v1/role-mails?selftests=0` excludes the self test projects.
+
 ## 0.1.4 - 2026-11-02
 - `mr:secrets:scan`: searches every text column of the node database and the log/data files
   (without the encrypted mail store and sessions) for secret values from `/etc/mailrunner/*.env` and the

@@ -24,7 +24,8 @@ class RoleMails extends BaseController
 
     public function index()
     {
-        return view('rolemails/index', ['nodes' => db_connect()->table('nodes')->where('enabled', 1)->orderBy('node_key')->get()->getResultArray()]);
+        return view('rolemails/index', ['nodes' => db_connect()->table('nodes')->where('enabled', 1)->orderBy('node_key')->get()->getResultArray(),
+            'selftests' => $this->request->getGet('selftests') === '1']);
     }
 
     /** htmx partial: list of one node. */
@@ -33,7 +34,9 @@ class RoleMails extends BaseController
         $nodeId = PublicId::id('nodes', $nodePid);
         $node = $this->node($nodeId);
         try {
-            $data = $this->sync()->client($node)->ok('GET', 'role-mails?limit=100')['data'];
+            // self test mails (customer "system") only on request
+            $selftests = $this->request->getGet('selftests') === '1' ? '' : '&selftests=0';
+            $data      = $this->sync()->client($node)->ok('GET', 'role-mails?limit=100' . $selftests)['data'];
         } catch (Throwable $e) {
             return view('rolemails/_list', ['node' => $node, 'mails' => [], 'error' => $e->getMessage()]);
         }

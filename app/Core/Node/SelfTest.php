@@ -15,6 +15,9 @@ class SelfTest
 {
     public const EVENT = 'node.selftest';
 
+    /** Reserved customer of the self test projects (system/selftest, system/selftest-isolation; install.sh). */
+    public const CUSTOMER = 'system';
+
     public function __construct(
         private readonly BaseConnection $db,
         private readonly JournalWriter $journal,

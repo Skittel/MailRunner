@@ -128,15 +128,19 @@ final class AdminApiTest extends CIUnitTestCase
         $cli = new ChangeContext('cli', 'phpunit');
         service('customerService')->create('acme', '', $cli);
         $p = service('projectService')->create('acme/inbox', 'analysis', '', $cli);
-        foreach ([['abuse@in.example.org', 'abuse'], ['user0001@in.example.org', null]] as $i => [$rcpt, $role]) {
+        service('customerService')->create('system', '', $cli);
+        $st = service('projectService')->create('system/selftest', 'analysis', '', $cli);
+        foreach ([['abuse@in.example.org', 'abuse'], ['user0001@in.example.org', null], ['postmaster@rx.selftest.test', 'postmaster']] as $i => [$rcpt, $role]) {
             db_connect()->table('receive_messages')->insert([
-                'message_id' => 'mrm_test' . $i, 'project_id' => $p['id'], 'spool_id' => 's' . $i, 'profile' => 'analysis', 'role' => $role,
+                'message_id' => 'mrm_test' . $i, 'project_id' => $i === 2 ? $st['id'] : $p['id'], 'spool_id' => 's' . $i, 'profile' => 'analysis', 'role' => $role,
                 'status' => 'analyzed', 'received_at' => '2026-11-01 23:00:00', 'imported_at' => '2026-11-01 23:00:00', 'queue_id' => 'Q',
                 'mail_from' => 'a@example.net', 'rcpt' => $rcpt, 'client_ip' => '192.0.2.1', 'helo' => 'h', 'client_name' => 'n',
                 'attachments' => '[]', 'analysis_status' => 'ok', 'size' => 1, 'sha256' => str_repeat('d', 64),
             ]);
         }
         [$s, $b] = $this->api('get', 'admin/v1/role-mails');
+        $this->assertSame([200, 2], [$s, count($b['data'])]);
+        [$s, $b] = $this->api('get', 'admin/v1/role-mails?selftests=0');
         $this->assertSame([200, 1, 'abuse', 'acme/inbox'], [$s, count($b['data']), $b['data'][0]['role'], $b['data'][0]['project']]);
         [$s] = $this->api('get', 'admin/v1/messages/mrm_test1');
         $this->assertSame(404, $s); // not a role mail

@@ -23,6 +23,9 @@ class RoleMails extends AdminController
         if (($before = (int) ($this->request->getGet('before_id') ?? 0)) > 0) {
             $b->where('m.id <', $before);
         }
+        if ($this->request->getGet('selftests') === '0') {
+            $b->where('c.customer_key !=', \App\Core\Node\SelfTest::CUSTOMER);
+        }
         $acked = $this->request->getGet('acked');
         if ($acked === '0') {
             $b->where('m.acked_at', null);
