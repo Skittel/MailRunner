@@ -5,6 +5,6 @@ set -e
 [ "$(id -u)" -eq 0 ] || { echo "run as root (sudo mailrunner ...)" >&2; exit 2; }
 MR_ACTOR="${SUDO_USER:-root}"; export MR_ACTOR
 case "$1" in
-    mr:apply|mr:node:init|mr:dns:flush) exec php /opt/mailrunner/current/spark "$@" ;;
+    mr:apply|mr:node:init|mr:dns:flush|mr:update) exec php /opt/mailrunner/current/spark "$@" ;;
     *) exec runuser -u mailrunner -- php /opt/mailrunner/current/spark "$@" ;;
 esac

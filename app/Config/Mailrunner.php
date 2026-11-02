@@ -33,6 +33,20 @@ class Mailrunner extends BaseConfig
      */
     public string $mxNames = '';
 
+    /**
+     * What MailRunner Admin may do on this node (app.env), each "auto" (default) or "manual":
+     *   adminUpdates  auto: a software update requested by the admin is installed at once (mailrunner-update unit);
+     *                 manual: it is only noted, install with "sudo mailrunner mr:update".
+     *   adminConfig   auto: configuration from the admin is applied at once;
+     *                 manual: it waits on the node, apply with "sudo mailrunner mr:config:apply".
+     * The code itself always comes from the git tags of the source repository, never from the admin.
+     */
+    public string $adminUpdates = 'auto';
+    public string $adminConfig  = 'auto';
+
+    /** Git checkout the node is installed from (install.sh writes it); mr:update works there. */
+    public string $sourceDir = '/opt/src/MailRunner';
+
     /** Days the journal keeps delivery attempts (smtp.connection / smtp.attempt). */
     public int $smtpJournalDays = 30;
 
@@ -48,6 +62,9 @@ class Mailrunner extends BaseConfig
         $this->dataDir        = rtrim((string) (env('MAILRUNNER_DATA_DIR') ?? $this->dataDir), '/');
         $this->smtpJournalDays = (int) (env('MAILRUNNER_SMTP_JOURNAL_DAYS') ?? $this->smtpJournalDays);
         $this->mxNames         = trim((string) (env('MAILRUNNER_MX_NAMES') ?? $this->mxNames));
+        $this->adminUpdates    = env('MAILRUNNER_ADMIN_UPDATES') === 'manual' ? 'manual' : 'auto';
+        $this->adminConfig     = env('MAILRUNNER_ADMIN_CONFIG') === 'manual' ? 'manual' : 'auto';
+        $this->sourceDir       = rtrim((string) (env('MAILRUNNER_SOURCE_DIR') ?? $this->sourceDir), '/');
     }
 
     public function nodeKeyFile(): string
@@ -63,6 +80,12 @@ class Mailrunner extends BaseConfig
     public function receiveSpoolDir(): string
     {
         return $this->dataDir . '/receive/spool';
+    }
+
+    /** Desired software version from MailRunner Admin (written by the node admin API, read by mr:update). */
+    public function updateRequestFile(): string
+    {
+        return $this->dataDir . '/update/desired.json';
     }
 
     public function receiveStoreDir(): string

@@ -25,6 +25,7 @@ $routes->group('v1', ['filter' => 'bearer'], static function (RouteCollection $r
 // Node admin API (decision E-19): mTLS with the MailRunner Admin CA, used by the admin GUI.
 $routes->group('admin/v1', ['filter' => 'admincert'], static function (RouteCollection $routes): void {
     $routes->get('node', '\App\Controllers\Admin\V1\Node::show');
+    $routes->put('node/update', '\App\Controllers\Admin\V1\Node::requestUpdate');
     $routes->get('journal', '\App\Controllers\Admin\V1\Node::journal');
     $routes->get('customers', '\App\Controllers\Admin\V1\Customers::index');
     $routes->put('customers/(:segment)', '\App\Controllers\Admin\V1\Customers::put/$1');

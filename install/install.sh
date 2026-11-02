@@ -118,7 +118,8 @@ install -d -o mailrunner -g mailrunner -m 0750 /var/lib/mailrunner /var/lib/mail
     /var/lib/mailrunner/receive/spool/analyzed /var/lib/mailrunner/receive/spool/failed /var/lib/mailrunner/receive/store \
     /var/lib/mailrunner/receive/spool/smtp \
     /var/lib/mailrunner/writable /var/lib/mailrunner/writable/cache /var/lib/mailrunner/writable/logs \
-    /var/lib/mailrunner/writable/session /var/lib/mailrunner/writable/uploads /var/lib/mailrunner/writable/debugbar
+    /var/lib/mailrunner/writable/session /var/lib/mailrunner/writable/uploads /var/lib/mailrunner/writable/debugbar \
+    /var/lib/mailrunner/update
 install -d -m 0755 /opt/mailrunner /opt/mailrunner/releases
 
 if [[ ! -f /etc/mailrunner/app.env ]]; then
@@ -148,6 +149,19 @@ ENV
     chown root:mailrunner /etc/mailrunner/app.env
     chmod 0640 /etc/mailrunner/app.env
 fi
+# What MailRunner Admin may do on this node; kept on updates, defaults only when missing.
+if ! grep -q '^MAILRUNNER_ADMIN_UPDATES' /etc/mailrunner/app.env; then
+    cat >> /etc/mailrunner/app.env <<'ENV'
+
+# MailRunner Admin may (auto) or may not (manual) install software updates / apply configuration on this node.
+# manual: updates with "sudo mailrunner mr:update", configuration with "sudo mailrunner mr:config:apply"
+# (both show the changes and ask; --silent for RMM). The code always comes from the git tags of the source.
+MAILRUNNER_ADMIN_UPDATES = auto
+MAILRUNNER_ADMIN_CONFIG = auto
+ENV
+fi
+sed -i '/^MAILRUNNER_SOURCE_DIR = /d' /etc/mailrunner/app.env
+echo "MAILRUNNER_SOURCE_DIR = \"$SOURCE\"" >> /etc/mailrunner/app.env
 if [[ -n "$MX_NAMES" ]]; then
     [[ "$MX_NAMES" =~ ^[a-z0-9.=46\ ,-]+$ ]] || die "--mx-names: invalid characters"
     sed -i '/^MAILRUNNER_MX_NAMES = /d' /etc/mailrunner/app.env
@@ -236,7 +250,7 @@ systemctl disable --now mailrunner-analyze.path >/dev/null 2>&1 || true
 rm -f /etc/systemd/system/mailrunner-analyze.path /etc/systemd/system/mailrunner-analyze.service
 install -m 0644 "$T"/systemd/mailrunner-* /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now mailrunner-import.path mailrunner-apply.path mailrunner-maintenance.timer >/dev/null 2>&1
+systemctl enable --now mailrunner-import.path mailrunner-apply.path mailrunner-maintenance.timer mailrunner-update.path >/dev/null 2>&1
 # journal of delivery attempts (reads the mail log; restart picks up a new release)
 systemctl enable mailrunner-smtplog >/dev/null 2>&1
 systemctl reset-failed mailrunner-import.service mailrunner-import.path >/dev/null 2>&1 || true

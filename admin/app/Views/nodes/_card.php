@@ -22,6 +22,11 @@
                 · <?= (int) ($st['ok'] ?? 0) ?> ok · <?= ago($st['finished_at'] ?? null) ?><?php else: ?>–<?php endif ?></dd>
             <dt class="col-5">Mails 24 h</dt><dd class="col-7"><?= (int) ($s['counts']['messages_24h'] ?? 0) ?> · SMTP-Sitzungen <?= (int) ($s['counts']['smtp_sessions_24h'] ?? 0) ?></dd>
             <dt class="col-5">Nicht abgeholt</dt><dd class="col-7"><?= (int) ($s['counts']['messages_unacked'] ?? 0) ?> (davon postmaster/abuse <?= (int) ($s['counts']['role_mails_unacked'] ?? 0) ?>)</dd>
+            <dt class="col-5">Admin darf</dt><dd class="col-7"><?php $pol = $s['policy'] ?? []; ?>
+                Updates <?= ($pol['updates'] ?? 'auto') === 'manual' ? '<span class="badge bg-orange-lt">manuell</span>' : '<span class="badge bg-green-lt">auto</span>' ?>
+                · Konfiguration <?= ($pol['config'] ?? 'auto') === 'manual' ? '<span class="badge bg-orange-lt">manuell</span>' : '<span class="badge bg-green-lt">auto</span>' ?></dd>
+            <?php if (! empty($s['pending_changes'])): ?><dt class="col-5">Wartet auf Freigabe</dt><dd class="col-7 text-warning"><?= (int) $s['pending_changes'] ?> Änderung(en) · <code>mr:config:apply</code></dd><?php endif ?>
+            <?php if (! empty($s['update_requested']) && version_compare((string) $s['update_requested'], (string) ($s['version'] ?? '0'), '>')): ?><dt class="col-5">Update</dt><dd class="col-7 text-warning">v<?= esc($s['update_requested']) ?> angefordert<?= ($pol['updates'] ?? 'auto') === 'manual' ? ' · <code>mr:update</code> an der Node' : '' ?></dd><?php endif ?>
             <dt class="col-5">Abgefragt</dt><dd class="col-7"><?= ago($n['last_checked_at']) ?></dd>
         </dl>
         <?php if ($detail && $st): ?>

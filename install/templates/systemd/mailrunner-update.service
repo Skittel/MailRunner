@@ -1,0 +1,10 @@
+[Unit]
+Description=MailRunner: install the update requested by MailRunner Admin (only with MAILRUNNER_ADMIN_UPDATES=auto)
+After=network-online.target mariadb.service
+
+[Service]
+Type=oneshot
+# root: the installer manages packages and system files. Code comes from the git tags of MAILRUNNER_SOURCE_DIR,
+# never from MailRunner Admin; mr:update --from-admin never downgrades and does nothing in manual mode.
+ExecStart=/usr/bin/php /opt/mailrunner/current/spark mr:update --from-admin
+TimeoutStartSec=30min

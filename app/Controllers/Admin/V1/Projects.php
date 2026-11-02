@@ -2,6 +2,7 @@
 
 namespace App\Controllers\Admin\V1;
 
+use App\Core\Admin\AdminChanges;
 use App\Core\Api\ApiResponse;
 use App\Core\Support\ConfigException;
 use App\Core\Support\Time;
@@ -17,7 +18,7 @@ use App\Core\Support\Time;
  */
 class Projects extends AdminController
 {
-    private const SETTINGS = ['recipient_pattern', 'recipient_always_allow', 'delete_after_ack_hours', 'unacked_days',
+    public const SETTINGS = ['recipient_pattern', 'recipient_always_allow', 'delete_after_ack_hours', 'unacked_days',
         'metadata_days', 'journal_scope', 'role_mail', 'role_mail_forward_to'];
 
     public function index()
@@ -52,37 +53,12 @@ class Projects extends AdminController
     public function put(string $customer, string $project)
     {
         return $this->guard(function () use ($customer, $project) {
-            $ref      = $customer . '/' . $project;
-            $body     = $this->body();
-            $projects = service('projectService');
-            $created  = false;
-            $existing = $projects->find($ref);
-            if ($existing === null) {
-                $projects->create($ref, (string) ($body['profile'] ?? ''), (string) ($body['name'] ?? ''), $this->ctx());
-                $created = true;
-            } elseif (isset($body['profile']) && $body['profile'] !== $existing['profile']) {
-                throw new ConfigException('PROFILE_IMMUTABLE', 'The profile of an existing project cannot be changed');
+            $ref  = $customer . '/' . $project;
+            $body = $this->body();
+            if ($this->configManual()) {
+                return $this->queued('project', $ref, $body);
             }
-            $settings = is_array($body['settings'] ?? null) ? $body['settings'] : [];
-            $unknown  = array_diff(array_keys($settings), self::SETTINGS);
-            if ($unknown !== []) {
-                throw new ConfigException('INVALID_SETTING', 'Unknown setting(s): ' . implode(', ', $unknown));
-            }
-            $changes = $settings + array_intersect_key($body, ['name' => 1, 'enabled' => 1]);
-            if ($changes !== []) {
-                $projects->update($ref, $changes, $this->ctx());
-            }
-            if (array_key_exists('routes', $body)) {
-                if (! is_array($body['routes'])) {
-                    throw new ConfigException('INVALID_ROUTE', 'routes must be a list');
-                }
-                $current = array_column(service('routeService')->list($ref), 'route');
-                $wanted  = array_values(array_map('strval', $body['routes']));
-                if (array_map('strtolower', $wanted) != $current || $created) {
-                    service('routeService')->set($ref, $wanted, $this->ctx());
-                }
-            }
-            $p = $projects->get($ref);
+            [$p, $created] = (new AdminChanges())->project($ref, $body, $this->ctx());
 
             return ApiResponse::ok(['data' => self::present($p, array_column(service('routeService')->list($ref), 'route')), 'created' => $created], $created ? 201 : 200);
         });
@@ -90,6 +66,10 @@ class Projects extends AdminController
 
     public function createToken(string $customer, string $project)
     {
+        if ($this->configManual()) {
+            return ApiResponse::error(409, 'CONFIG_MANUAL', 'This node applies admin configuration only after approval; create tokens on the node: mr:token:create');
+        }
+
         return $this->guard(function () use ($customer, $project) {
             $body  = $this->body();
             $days  = isset($body['expires_days']) ? (int) $body['expires_days'] : null;
@@ -102,6 +82,10 @@ class Projects extends AdminController
 
     public function revokeToken(string $tokenId)
     {
+        if ($this->configManual()) {
+            return $this->queued('token_revoke', $tokenId, []);
+        }
+
         return $this->guard(function () use ($tokenId) {
             service('apiTokenService')->revoke($tokenId, $this->ctx());
 

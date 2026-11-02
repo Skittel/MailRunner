@@ -146,4 +146,48 @@ final class AdminApiTest extends CIUnitTestCase
         [$s] = $this->api('get', 'admin/v1/messages/mrm_test1');
         $this->assertSame(404, $s); // not a role mail
     }
+
+    public function testManualConfigQueuesUntilApprovedOnTheNode(): void
+    {
+        config('Mailrunner')->adminConfig = 'manual';
+        [$s, $b] = $this->api('put', 'admin/v1/customers/acme', ['name' => 'ACME']);
+        $this->assertSame([202, true], [$s, $b['pending']]);
+        $this->dontSeeInDatabase('customers', ['customer_key' => 'acme']);
+        [$s] = $this->api('put', 'admin/v1/customers/acme', ['name' => 'ACME GmbH']); // replaces the open change
+        $this->assertSame(202, $s);
+        $this->assertSame(1, $this->db->table('admin_pending_changes')->where('decided_at', null)->countAllResults());
+        [$s, $b] = $this->api('put', 'admin/v1/projects/acme/inbox', ['profile' => 'analysis', 'routes' => ['in.example.org'], 'settings' => ['journal_scope' => 'connections']]);
+        $this->assertSame(202, $s);
+        [$s, $b] = $this->api('post', 'admin/v1/projects/acme/inbox/tokens', ['label' => 'x']);
+        $this->assertSame([409, 'CONFIG_MANUAL'], [$s, $b['error']['code']]);
+        [$s, $b] = $this->api('get', 'admin/v1/node');
+        $this->assertSame(['manual', 2], [$b['policy']['config'], $b['pending_changes']]);
+        $this->seeInDatabase('journal', ['event' => 'admin.change_queued']);
+
+        // preview shows what would change, then the CLI applies everything
+        $preview = (new \App\Core\Admin\AdminChanges())->preview('project', 'acme/inbox', ['profile' => 'analysis', 'routes' => ['in.example.org'], 'settings' => ['journal_scope' => 'connections']]);
+        $this->assertSame([null, ['in.example.org']], $preview['routes']);
+        command('mr:config:apply --silent');
+        $this->seeInDatabase('customers', ['customer_key' => 'acme', 'name' => 'ACME GmbH', 'managed_by' => 'admin']);
+        $this->seeInDatabase('projects', ['project_key' => 'inbox', 'journal_scope' => 'connections']);
+        $this->seeInDatabase('receive_routes', ['route' => 'in.example.org']);
+        $this->assertSame(0, $this->db->table('admin_pending_changes')->where('decided_at', null)->countAllResults());
+        $this->seeInDatabase('admin_pending_changes', ['decision' => 'applied']);
+    }
+
+    public function testUpdateRequestIsStoredForTheNode(): void
+    {
+        $dir = sys_get_temp_dir() . '/mr-update-' . bin2hex(random_bytes(4));
+        config('Mailrunner')->dataDir = $dir;
+        [$s, $b] = $this->api('put', 'admin/v1/node/update', ['version' => 'x']);
+        $this->assertSame([422, 'INVALID_VERSION'], [$s, $b['error']['code']]);
+        [$s, $b] = $this->api('put', 'admin/v1/node/update', ['version' => '0.0.1']);
+        $this->assertSame([422, 'NOT_NEWER'], [$s, $b['error']['code']]);
+        [$s, $b] = $this->api('put', 'admin/v1/node/update', ['version' => '99.0.0']);
+        $this->assertSame([202, '99.0.0', 'auto'], [$s, $b['requested'], $b['mode']]);
+        $this->assertSame('99.0.0', json_decode((string) file_get_contents($dir . '/update/desired.json'), true)['version']);
+        [$s, $b] = $this->api('get', 'admin/v1/node');
+        $this->assertSame(['99.0.0', 'auto'], [$b['update_requested'], $b['policy']['updates']]);
+        exec('rm -rf ' . escapeshellarg($dir));
+    }
 }

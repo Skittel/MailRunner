@@ -28,6 +28,7 @@ class Sync
         $now = Clock::now();
         try {
             $status = $this->client($node)->ok('GET', 'node');
+            $status = $this->offerUpdate($node, $status);
             db_connect()->table('nodes')->where('id', $node['id'])->update([
                 'last_checked_at' => $now, 'last_ok_at' => $now, 'last_error' => null,
                 'last_status' => json_encode($status, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
@@ -66,7 +67,9 @@ class Sync
                 'settings' => json_decode($p['settings'], true) ?: [],
             ]);
             if ($own) {
-                $db->table('projects')->where('id', $projectId)->update(['synced_at' => Clock::now(), 'sync_error' => null, 'node_revision' => (int) ($res['data']['revision'] ?? 0)]);
+                $db->table('projects')->where('id', $projectId)->update(! empty($res['pending'])
+                    ? ['sync_error' => null, 'sync_pending' => 1] // node in manual mode: waits for mr:config:apply there
+                    : ['synced_at' => Clock::now(), 'sync_error' => null, 'sync_pending' => 0, 'node_revision' => (int) ($res['data']['revision'] ?? 0)]);
             }
 
             return null;
@@ -124,6 +127,37 @@ class Sync
         }
 
         return $stats;
+    }
+
+    /**
+     * Automatic updates: if the node runs an older version than this admin, ask it once to update to the admin's
+     * version. The node decides (MAILRUNNER_ADMIN_UPDATES auto|manual) and fetches the code from its own git source.
+     *
+     * @param array<string, mixed> $status
+     *
+     * @return array<string, mixed>
+     */
+    private function offerUpdate(array $node, array $status): array
+    {
+        $mine = \App\Controllers\Enroll::version();
+        $its  = (string) ($status['version'] ?? '');
+        if ($mine === '' || $its === '' || ! version_compare($its, $mine, '<') || ($status['update_requested'] ?? null) === $mine) {
+            return $status;
+        }
+
+        return $this->requestUpdate($node, $mine) === null ? ['update_requested' => $mine] + $status : $status;
+    }
+
+    /** Asks a node to update to $version; null or the error. */
+    public function requestUpdate(array $node, string $version): ?string
+    {
+        try {
+            $this->client($node)->ok('PUT', 'node/update', ['version' => $version]);
+
+            return null;
+        } catch (Throwable $e) {
+            return $e->getMessage();
+        }
     }
 
     /**

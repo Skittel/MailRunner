@@ -212,6 +212,19 @@ final class PagesTest extends CIUnitTestCase
         $this->withSession($this->admin)->get('nodes/enroll/dns')->assertSee('Hostname eingeben');
     }
 
+    public function testManualNodeShownAsSuch(): void
+    {
+        $st = json_decode($this->db->table('nodes')->where('id', 1)->get()->getRow('last_status'), true);
+        $st += ['policy' => ['updates' => 'manual', 'config' => 'manual'], 'pending_changes' => 2, 'update_requested' => '9.9.9'];
+        $this->db->table('nodes')->where('id', 1)->update(['last_status' => json_encode($st)]);
+        $r = $this->withSession($this->admin)->get('nodes/cards');
+        $r->assertSee('manuell');
+        $r->assertSee('2 Änderung(en)');
+        $r->assertSee('v9.9.9 angefordert');
+        $this->db->table('projects')->where('id', 1)->update(['sync_pending' => 1]);
+        $this->withSession($this->admin)->get('projects/pr0j-0001')->assertSee('Wartet auf Freigabe');
+    }
+
     public function testProjectMove(): void
     {
         $now = '2026-11-02 08:00:00.000000';

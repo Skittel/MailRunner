@@ -29,6 +29,21 @@ abstract class AdminController extends BaseController
         return is_array($data) ? $data : [];
     }
 
+    /** MAILRUNNER_ADMIN_CONFIG=manual: changes wait on the node for mr:config:apply. */
+    protected function configManual(): bool
+    {
+        return config('Mailrunner')->adminConfig === 'manual';
+    }
+
+    /** Queues a change (manual mode) and answers 202 with the pending id. */
+    protected function queued(string $kind, string $ref, array $body): ResponseInterface
+    {
+        $id = (new \App\Core\Admin\PendingChanges())->queue($kind, $ref, $body, (string) ($this->ctx()->actor ?? "admin"));
+
+        return ApiResponse::ok(['pending' => true, 'pending_id' => $id,
+            'message' => 'Queued: this node applies admin configuration only after approval (mr:config:apply)'], 202);
+    }
+
     /**
      * Runs a config change and maps ConfigException codes to HTTP status codes.
      */

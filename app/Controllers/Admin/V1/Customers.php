@@ -2,6 +2,7 @@
 
 namespace App\Controllers\Admin\V1;
 
+use App\Core\Admin\AdminChanges;
 use App\Core\Api\ApiResponse;
 
 /**
@@ -18,15 +19,11 @@ class Customers extends AdminController
     public function put(string $key)
     {
         return $this->guard(function () use ($key) {
-            $body    = $this->body();
-            $service = service('customerService');
-            $created = false;
-            if ($service->findByKey($key) === null) {
-                $service->create($key, (string) ($body['name'] ?? ''), $this->ctx());
-                $created = true;
+            $body = $this->body();
+            if ($this->configManual()) {
+                return $this->queued('customer', $key, $body);
             }
-            $changes = array_intersect_key($body, ['name' => 1, 'enabled' => 1]);
-            $customer = $changes === [] ? $service->getByKey($key) : $service->update($key, $changes, $this->ctx());
+            [$customer, $created] = (new AdminChanges())->customer($key, $body, $this->ctx());
 
             return ApiResponse::ok(['data' => self::present($customer), 'created' => $created], $created ? 201 : 200);
         });

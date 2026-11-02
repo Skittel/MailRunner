@@ -2,6 +2,12 @@
 
 namespace App\Controllers\Admin\V1;
 
+use App\Core\Support\Transaction;
+
+use App\Core\Node\Updater;
+
+use App\Core\Admin\PendingChanges;
+
 use App\Core\Api\ApiResponse;
 use App\Core\Node\NodeInfo;
 use App\Core\Node\SelfTest;
@@ -35,7 +41,33 @@ class Node extends AdminController
             'roles'    => $info['roles'],
             'selftest' => $last === null ? null : ['recorded_at' => Time::toIso($last['created_at'])] + (json_decode((string) $last['details'], true) ?: []),
             'counts'   => $counts,
+            'policy'   => ['updates' => config('Mailrunner')->adminUpdates, 'config' => config('Mailrunner')->adminConfig],
+            'pending_changes' => (new PendingChanges())->count(),
+            'update_requested' => Updater::forNode()->requested()['version'] ?? null,
         ]);
+    }
+
+    /**
+     * PUT /admin/v1/node/update {"version": "n.n.n"} - asks the node to update. The node fetches the tag from its own
+     * source repository; with MAILRUNNER_ADMIN_UPDATES=manual the request is only noted (mr:update on the node).
+     */
+    public function requestUpdate()
+    {
+        $body    = $this->request->getJSON(true) ?: [];
+        $version = (string) ($body['version'] ?? '');
+        if (! NodeInfo::isValidVersion($version)) {
+            return ApiResponse::error(422, 'INVALID_VERSION', 'version must be n.n.n');
+        }
+        $current = (new NodeInfo(config('Mailrunner')))->version();
+        if (version_compare($version, $current, '<=')) {
+            return ApiResponse::error(422, 'NOT_NEWER', 'v' . $version . ' is not newer than the installed v' . $current);
+        }
+        Updater::forNode()->request($version, (string) ($this->ctx()->actor ?? 'admin'));
+        $mode = config('Mailrunner')->adminUpdates;
+        Transaction::run(db_connect(), fn () => service('journalWriter')->append('node.update_requested', $this->ctx(), null, null, ['version' => $version, 'mode' => $mode]));
+
+        return ApiResponse::ok(['requested' => $version, 'current' => $current, 'mode' => $mode,
+            'message' => $mode === 'auto' ? 'The node installs the update now.' : 'Noted; install on the node: sudo mailrunner mr:update'], 202);
     }
 
     public function journal()

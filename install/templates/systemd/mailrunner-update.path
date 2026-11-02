@@ -1,0 +1,8 @@
+[Unit]
+Description=MailRunner: software update requested by MailRunner Admin
+
+[Path]
+PathChanged=/var/lib/mailrunner/update/desired.json
+
+[Install]
+WantedBy=multi-user.target

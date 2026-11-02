@@ -15,9 +15,13 @@ $this->setVar('pretitle', '<a href="/customers/' . $customer['public_id'] . '">'
 <?= $this->endSection() ?><?php endif ?>
 <?= $this->section('content') ?>
 <?php if (! $isNew): ?>
+    <?php if (! empty($project['sync_pending']) && ! $project['sync_error']): ?>
+    <div class="alert alert-warning">Wartet auf Freigabe an der Node <span class="mono"><?= esc($project['node_key']) ?></span>: Sie übernimmt Konfiguration nur nach Bestätigung (<code>sudo mailrunner mr:config:apply</code>).</div>
+    <?php else: ?>
     <div class="alert <?= $project['sync_error'] ? 'alert-danger' : 'alert-success' ?>">
         <?= $project['sync_error'] ? 'Nicht auf die Node übertragen: ' . esc($project['sync_error']) : 'Auf Node <span class="mono">' . esc($project['node_key']) . '</span> übertragen ' . ago($project['synced_at']) . ' (Revision ' . (int) $project['node_revision'] . ').' ?>
     </div>
+    <?php endif ?>
 <?php endif ?>
 <div class="row row-cards">
 <div class="col-lg-8">

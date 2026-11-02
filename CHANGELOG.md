@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.9 - 2026-11-02
+- Node switches in `/etc/mailrunner/app.env` (default `auto`, kept on updates):
+  - `MAILRUNNER_ADMIN_UPDATES=auto|manual`: MailRunner Admin may request a software update
+    (`PUT /admin/v1/node/update`); `auto` installs it at once (`mailrunner-update.path/.service`, root),
+    `manual` only notes it (journal `node.update_available`).
+  - `MAILRUNNER_ADMIN_CONFIG=auto|manual`: `manual` queues configuration from the admin
+    (`admin_pending_changes`, answer 202, journal `admin.change_queued`); token creation then only on the node.
+- `mr:update [--version] [--silent] [--allow-downgrade] [--force]`: update from the git tags of
+  `MAILRUNNER_SOURCE_DIR` (never code from the admin), shows changelog, commits and changed files and asks;
+  refuses downgrades (admin requests never downgrade) and local changes.
+- `mr:config:apply [--silent] [--discard] [--json]`: shows each waiting change field by field and asks.
+- Admin: requests an update automatically when a node runs an older version; node card shows the policy,
+  waiting changes and requested updates; projects show "Wartet auf Freigabe".
+
 ## 0.1.8 - 2026-11-02
 - New node with one command: `curl -fsSL https://<admin>/enroll/bootstrap.sh | sudo bash -s -- <token>`.
   Node id, host name and MX names are entered in MailRunner Admin; the node gets them with the token
