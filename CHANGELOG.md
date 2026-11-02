@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.11 - 2026-11-02
+- Self test: the Spamhaus DQS check retries once after 3 s on SERVFAIL/timeout (unbound right after an
+  install answered SERVFAIL; false failure in the install self test).
+
 ## 0.1.10 - 2026-11-02
 - MX names may be separated by commas and/or spaces everywhere (admin enrollment form and DNS check,
   `install.sh --mx-names`, `install/lib/dnscheck.py`; the self test already did). The admin stores them
