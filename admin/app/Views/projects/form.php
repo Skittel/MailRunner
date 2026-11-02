@@ -9,9 +9,9 @@ $fb = static fn ($k) => isset($errors[$k]) ? '<div class="invalid-feedback">' . 
 ?>
 <?= $this->extend('layouts/main') ?>
 <?php $this->setVar('title', $isNew ? 'Projekt anlegen' : $project['name']);
-$this->setVar('pretitle', '<a href="/customers/' . $customer['id'] . '">' . esc($customer['name']) . '</a>' . ($isNew ? '' : ' · <span class="mono">' . esc($customer['customer_key'] . '/' . $project['project_key']) . '</span>')) ?>
+$this->setVar('pretitle', '<a href="/customers/' . $customer['public_id'] . '">' . esc($customer['name']) . '</a>' . ($isNew ? '' : ' · <span class="mono">' . esc($customer['customer_key'] . '/' . $project['project_key']) . '</span>')) ?>
 <?php if (! $isNew): ?><?= $this->section('actions') ?>
-<?php if (can_write()): ?><form method="post" action="/projects/<?= $project['id'] ?>/push" class="d-inline"><?= csrf_field() ?><button class="btn btn-outline-secondary">Erneut übertragen</button></form><?php endif ?>
+<?php if (can_write()): ?><form method="post" action="/projects/<?= $project['public_id'] ?>/push" class="d-inline"><?= csrf_field() ?><button class="btn btn-outline-secondary">Erneut übertragen</button></form><?php endif ?>
 <?= $this->endSection() ?><?php endif ?>
 <?= $this->section('content') ?>
 <?php if (! $isNew): ?>
@@ -21,13 +21,13 @@ $this->setVar('pretitle', '<a href="/customers/' . $customer['id'] . '">' . esc(
 <?php endif ?>
 <div class="row row-cards">
 <div class="col-lg-8">
-<form method="post" action="<?= $isNew ? '/customers/' . $customer['id'] . '/projects' : '/projects/' . $project['id'] ?>" class="card"><?= csrf_field() ?>
+<form method="post" action="<?= $isNew ? '/customers/' . $customer['public_id'] . '/projects' : '/projects/' . $project['public_id'] ?>" class="card"><?= csrf_field() ?>
     <fieldset class="card-body"<?= can_write() ? '' : ' disabled' ?>>
         <div class="row">
             <?php if ($isNew): ?>
             <div class="col-md-4 mb-3"><label class="form-label required">Schlüssel</label><input name="project_key" class="form-control<?= $err('project_key') ?>" value="<?= esc($project['project_key'] ?? '') ?>" placeholder="inbox"><?= $fb('project_key') ?></div>
             <div class="col-md-4 mb-3"><label class="form-label required">Node</label><select name="node_id" class="form-select<?= $err('node_id') ?>">
-                <?php foreach ($nodes as $n): ?><option value="<?= $n['id'] ?>"<?= (int) ($project['node_id'] ?? 0) === (int) $n['id'] ? ' selected' : '' ?>><?= esc($n['name']) ?> (<?= esc($n['node_key']) ?>)</option><?php endforeach ?></select><?= $fb('node_id') ?></div>
+                <?php foreach ($nodes as $n): ?><option value="<?= $n['public_id'] ?>"<?= (int) ($project['node_id'] ?? 0) === (int) $n['id'] ? ' selected' : '' ?>><?= esc($n['name']) ?> (<?= esc($n['node_key']) ?>)</option><?php endforeach ?></select><?= $fb('node_id') ?></div>
             <div class="col-md-4 mb-3"><label class="form-label required">Profil</label><select name="profile" class="form-select">
                 <?php foreach (Projects::PROFILES as $k => $l): ?><option value="<?= $k ?>"<?= ($project['profile'] ?? 'analysis') === $k ? ' selected' : '' ?>><?= esc($l) ?></option><?php endforeach ?></select></div>
             <?php else: ?>
@@ -56,12 +56,12 @@ $this->setVar('pretitle', '<a href="/customers/' . $customer['id'] . '">' . esc(
         </div>
         <label class="form-check form-switch"><input class="form-check-input" type="checkbox" name="enabled" value="1"<?= ($project['enabled'] ?? 1) ? ' checked' : '' ?>><span class="form-check-label">aktiv</span></label>
     </fieldset>
-    <?php if (can_write()): ?><div class="card-footer text-end"><a href="/customers/<?= $customer['id'] ?>" class="btn btn-link">Abbrechen</a><button class="btn btn-primary"><?= $isNew ? 'Anlegen und übertragen' : 'Speichern und übertragen' ?></button></div><?php endif ?>
+    <?php if (can_write()): ?><div class="card-footer text-end"><a href="/customers/<?= $customer['public_id'] ?>" class="btn btn-link">Abbrechen</a><button class="btn btn-primary"><?= $isNew ? 'Anlegen und übertragen' : 'Speichern und übertragen' ?></button></div><?php endif ?>
 </form>
 </div>
 <?php if (! $isNew): ?>
 <div class="col-lg-4"><div class="card"><div class="card-header"><h3 class="card-title">API-Tokens</h3></div>
-    <div id="tokens" hx-get="/projects/<?= $project['id'] ?>/tokens" hx-trigger="load"><div class="card-body text-secondary">Lädt …</div></div></div></div>
+    <div id="tokens" hx-get="/projects/<?= $project['public_id'] ?>/tokens" hx-trigger="load"><div class="card-body text-secondary">Lädt …</div></div></div></div>
 <?php endif ?>
 </div>
 <?= $this->endSection() ?>

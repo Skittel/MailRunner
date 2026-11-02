@@ -130,16 +130,28 @@ class ProjectService
             if (($merged['role_mail'] ?? 'default') === 'forward' && empty($merged['role_mail_forward_to'])) {
                 throw new ConfigException('INVALID_SETTING', 'role_mail forward needs role_mail_forward_to');
             }
-            $row     = $changes;
+            // Only real changes count (the admin GUI always sends the full desired state).
+            $changes = array_filter($changes, static function ($value, string $field) use ($project): bool {
+                $current = $project[$field] ?? null;
+                if ($field === 'recipient_always_allow') {
+                    $current = is_string($current) ? json_decode($current, true) : $current;
+
+                    return $value !== $current;
+                }
+
+                return $value === null || $current === null ? $value !== $current : (string) $value !== (string) $current;
+            }, ARRAY_FILTER_USE_BOTH);
+            $row = $changes;
             if ($ctx->source === 'admin' && $project['managed_by'] !== 'admin') {
                 $row['managed_by'] = 'admin'; // the admin GUI takes over a project created on the CLI
             }
             if (array_key_exists('recipient_always_allow', $row)) {
                 $row['recipient_always_allow'] = $row['recipient_always_allow'] === null ? null : json_encode($row['recipient_always_allow']);
             }
-            if ($row !== []) {
-                $this->db->table('projects')->where('id', $project['id'])->update($row + ['updated_at' => Time::now()]);
+            if ($row === []) {
+                return $this->getById((int) $project['id']); // nothing changed: no revision, no journal entry
             }
+            $this->db->table('projects')->where('id', $project['id'])->update($row + ['updated_at' => Time::now()]);
             $revision = $this->bumpRevision((int) $project['id']);
             $this->journal->append('project.updated', $ctx, (int) $project['customer_id'], (int) $project['id'], [
                 'project' => $ref, 'changed' => array_keys($changes), 'revision' => $revision,

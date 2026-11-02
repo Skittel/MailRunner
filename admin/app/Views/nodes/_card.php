@@ -1,12 +1,12 @@
 <?php $s = $n['status']; $st = $s['selftest'] ?? null; $h = $n['health']; ?>
-<div class="card" id="node-<?= $n['id'] ?>">
+<div class="card" id="node-<?= $n['public_id'] ?>">
     <div class="card-status-top <?= ['ok' => 'bg-green', 'warn' => 'bg-yellow', 'fail' => 'bg-red'][$h['level']] ?? 'bg-secondary' ?>"></div>
     <div class="card-header">
-        <h3 class="card-title"><?= status_dot($h['level']) ?><a href="/nodes/<?= $n['id'] ?>" class="text-reset"><?= esc($n['name']) ?></a>
+        <h3 class="card-title"><?= status_dot($h['level']) ?><a href="/nodes/<?= $n['public_id'] ?>" class="text-reset"><?= esc($n['name']) ?></a>
             <span class="text-secondary small ms-2 mono"><?= esc($n['node_key']) ?></span></h3>
         <div class="card-actions">
 <?php if (can_write()): ?>
-            <button class="btn btn-sm btn-ghost-secondary" hx-post="/nodes/<?= $n['id'] ?>/poll<?= $detail ? '?detail=1' : '' ?>" hx-target="#node-<?= $n['id'] ?>" hx-swap="outerHTML">
+            <button class="btn btn-sm btn-ghost-secondary" hx-post="/nodes/<?= $n['public_id'] ?>/poll<?= $detail ? '?detail=1' : '' ?>" hx-target="#node-<?= $n['public_id'] ?>" hx-swap="outerHTML">
                 <span class="htmx-indicator spinner-border spinner-border-sm me-1"></span>Aktualisieren</button>
             <?php endif ?>
         </div>

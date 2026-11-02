@@ -69,14 +69,16 @@ class CustomerService
             if (array_key_exists('enabled', $changes)) {
                 $row['enabled'] = $changes['enabled'] ? 1 : 0;
             }
+            $row = array_filter($row, static fn ($v, string $k): bool => (string) $v !== (string) ($customer[$k] ?? ''), ARRAY_FILTER_USE_BOTH);
             if ($row === []) {
-                return $customer;
+                return $customer; // nothing changed: no journal entry
             }
+            $changed = array_keys($row);
             if ($ctx->source === 'admin') {
                 $row['managed_by'] = 'admin';
             }
             $this->db->table('customers')->where('id', $customer['id'])->update($row + ['updated_at' => Time::now()]);
-            $this->journal->append('customer.updated', $ctx, (int) $customer['id'], null, ['customer' => $key, 'changed' => array_keys($row)]);
+            $this->journal->append('customer.updated', $ctx, (int) $customer['id'], null, ['customer' => $key, 'changed' => $changed]);
             if (array_key_exists('enabled', $row)) {
                 ProjectService::requestApply();
             }

@@ -2,6 +2,8 @@
 
 namespace App\Controllers;
 
+use App\Libraries\PublicId;
+
 use App\Libraries\Audit;
 use App\Libraries\Clock;
 use App\Libraries\Sync;
@@ -39,24 +41,26 @@ class Customers extends BaseController
             return view('customers/form', ['customer' => $d, 'errors' => $e]);
         }
         $now = Clock::now();
-        db_connect()->table('customers')->insert(['customer_key' => $d['customer_key'], 'name' => trim((string) $d['name']) ?: $d['customer_key'],
+        db_connect()->table('customers')->insert(['public_id' => PublicId::generate('customers'), 'customer_key' => $d['customer_key'], 'name' => trim((string) $d['name']) ?: $d['customer_key'],
             'enabled' => 1, 'created_at' => $now, 'updated_at' => $now]);
         $id = (int) db_connect()->insertID();
         Audit::log('customer.created', $d['customer_key']);
 
-        return redirect()->to(site_url('customers/' . $id))->with('ok', 'Kunde angelegt. Er wird auf eine Node übertragen, sobald er dort ein Projekt hat.');
+        return redirect()->to(site_url('customers/' . self::pid('customers', $id)))->with('ok', 'Kunde angelegt. Er wird auf eine Node übertragen, sobald er dort ein Projekt hat.');
     }
 
-    public function show(int $id)
+    public function show(string $pid)
     {
+        $id = PublicId::id('customers', $pid);
         $c = $this->find($id);
 
         return view('customers/show', ['customer' => $c, 'projects' => db_connect()->table('projects p')->select('p.*, n.node_key')
             ->join('nodes n', 'n.id = p.node_id')->where('p.customer_id', $id)->orderBy('p.project_key')->get()->getResultArray()]);
     }
 
-    public function update(int $id)
+    public function update(string $pid)
     {
+        $id = PublicId::id('customers', $pid);
         $c = $this->find($id);
         db_connect()->table('customers')->where('id', $id)->update([
             'name' => trim((string) $this->request->getPost('name')) ?: $c['customer_key'],
@@ -65,7 +69,7 @@ class Customers extends BaseController
         Audit::log('customer.updated', $c['customer_key']);
         $err = (new Sync(config('Admin')))->pushCustomer($id);
 
-        return redirect()->to(site_url('customers/' . $id))->with($err === null ? 'ok' : 'error', $err === null ? 'Gespeichert und übertragen.' : 'Gespeichert, Übertragung fehlgeschlagen: ' . $err);
+        return redirect()->to(site_url('customers/' . self::pid('customers', $id)))->with($err === null ? 'ok' : 'error', $err === null ? 'Gespeichert und übertragen.' : 'Gespeichert, Übertragung fehlgeschlagen: ' . $err);
     }
 
     /**
@@ -75,5 +79,10 @@ class Customers extends BaseController
     {
         return db_connect()->table('customers')->where('id', $id)->get()->getRowArray()
             ?? throw \CodeIgniter\Exceptions\PageNotFoundException::forPageNotFound();
+    }
+
+    private static function pid(string $table, int $id): string
+    {
+        return (string) db_connect()->table($table)->select('public_id')->where('id', $id)->get()->getRow('public_id');
     }
 }

@@ -28,7 +28,7 @@ class NodeAdd extends BaseCommand
             CLI::write('Node ' . $key . ' exists.');
         } else {
             $now = Clock::now();
-            $db->table('nodes')->insert(['node_key' => $key, 'name' => $name ?: $key, 'base_url' => $url, 'enabled' => 1, 'created_at' => $now, 'updated_at' => $now]);
+            $db->table('nodes')->insert(['public_id' => \App\Libraries\PublicId::generate('nodes'), 'node_key' => $key, 'name' => $name ?: $key, 'base_url' => $url, 'enabled' => 1, 'created_at' => $now, 'updated_at' => $now]);
             CLI::write('Node ' . $key . ' added.', 'green');
         }
         $node = $db->table('nodes')->where('node_key', $key)->get()->getRowArray();

@@ -1,7 +1,7 @@
 <?= $this->extend('layouts/main') ?>
 <?php $this->setVar('title', $mail['subject'] ?? ($msg['header']['subject'] ?? '(kein Betreff)'));
 $this->setVar('pretitle', '<a href="/role-mails">postmaster & abuse</a> · ' . esc($msg['role']) . ' · <span class="mono">' . esc($msg['project']) . '</span>') ?>
-<?= $this->section('actions') ?><?php if ($msg['raw_available']): ?><a href="/role-mails/<?= $node['id'] ?>/<?= esc($msg['message_id'], 'url') ?>/raw" class="btn btn-outline-secondary">Original (.eml)</a><?php endif ?><?= $this->endSection() ?>
+<?= $this->section('actions') ?><?php if ($msg['raw_available']): ?><a href="/role-mails/<?= $node['public_id'] ?>/<?= esc($msg['message_id'], 'url') ?>/raw" class="btn btn-outline-secondary">Original (.eml)</a><?php endif ?><?= $this->endSection() ?>
 <?= $this->section('content') ?>
 <div class="row row-cards">
 <div class="col-lg-8"><div class="card">

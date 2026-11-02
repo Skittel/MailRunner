@@ -2,6 +2,8 @@
 
 namespace App\Controllers;
 
+use App\Libraries\PublicId;
+
 use App\Libraries\Audit;
 use App\Libraries\Clock;
 use App\Libraries\Health;
@@ -66,7 +68,7 @@ class Nodes extends BaseController
             return view('nodes/form', ['node' => $data, 'errors' => $errors]);
         }
         $now = Clock::now();
-        db_connect()->table('nodes')->insert([
+        db_connect()->table('nodes')->insert(['public_id' => PublicId::generate('nodes'),
             'node_key' => $data['node_key'], 'name' => trim($data['name']) ?: $data['node_key'], 'base_url' => rtrim($data['base_url'], '/'),
             'enabled' => 1, 'created_at' => $now, 'updated_at' => $now,
         ]);
@@ -74,28 +76,31 @@ class Nodes extends BaseController
         Audit::log('node.created', $data['node_key'], ['base_url' => $data['base_url']]);
         $this->sync()->poll(db_connect()->table('nodes')->where('id', $id)->get()->getRowArray());
 
-        return redirect()->to(site_url('nodes/' . $id))->with('ok', 'Node angelegt.');
+        return redirect()->to(site_url('nodes/' . self::pid('nodes', $id)))->with('ok', 'Node angelegt.');
     }
 
-    public function show(int $id)
+    public function show(string $pid)
     {
+        $id = PublicId::id('nodes', $pid);
         $node = $this->find($id);
 
         return view('nodes/show', ['node' => $node, 'projects' => db_connect()->table('projects p')->select('p.*, c.customer_key')
             ->join('customers c', 'c.id = p.customer_id')->where('p.node_id', $id)->orderBy('c.customer_key')->orderBy('p.project_key')->get()->getResultArray()]);
     }
 
-    public function poll(int $id)
+    public function poll(string $pid)
     {
+        $id = PublicId::id('nodes', $pid);
         $this->sync()->poll(db_connect()->table('nodes')->where('id', $id)->get()->getRowArray());
         $node = $this->find($id);
 
-        return $this->request->hasHeader('HX-Request') ? view('nodes/_card', ['n' => $node, 'detail' => (bool) $this->request->getGet('detail')]) : redirect()->to(site_url('nodes/' . $id));
+        return $this->request->hasHeader('HX-Request') ? view('nodes/_card', ['n' => $node, 'detail' => (bool) $this->request->getGet('detail')]) : redirect()->to(site_url('nodes/' . self::pid('nodes', $id)));
     }
 
     /** htmx partial: newest journal events of the node (live from the node). */
-    public function journal(int $id)
+    public function journal(string $pid)
     {
+        $id = PublicId::id('nodes', $pid);
         $node  = $this->find($id);
         $event = preg_replace('/[^a-z_.,]/', '', (string) $this->request->getGet('event'));
         try {
@@ -107,17 +112,18 @@ class Nodes extends BaseController
         return view('nodes/_journal', ['events' => $page['data']]);
     }
 
-    public function import(int $id)
+    public function import(string $pid)
     {
+        $id = PublicId::id('nodes', $pid);
         $node = $this->find($id);
         try {
             $stats = $this->sync()->import($node);
         } catch (Throwable $e) {
-            return redirect()->to(site_url('nodes/' . $id))->with('error', 'Import fehlgeschlagen: ' . $e->getMessage());
+            return redirect()->to(site_url('nodes/' . self::pid('nodes', $id)))->with('error', 'Import fehlgeschlagen: ' . $e->getMessage());
         }
         Audit::log('node.imported', $node['node_key'], $stats);
 
-        return redirect()->to(site_url('nodes/' . $id))->with('ok', sprintf('Übernommen: %d Kunden, %d Projekte.', $stats['customers'], $stats['projects']));
+        return redirect()->to(site_url('nodes/' . self::pid('nodes', $id)))->with('ok', sprintf('Übernommen: %d Kunden, %d Projekte.', $stats['customers'], $stats['projects']));
     }
 
     /**
@@ -153,5 +159,10 @@ class Nodes extends BaseController
         }
 
         return $e;
+    }
+
+    private static function pid(string $table, int $id): string
+    {
+        return (string) db_connect()->table($table)->select('public_id')->where('id', $id)->get()->getRow('public_id');
     }
 }

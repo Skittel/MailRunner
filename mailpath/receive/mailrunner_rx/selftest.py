@@ -52,7 +52,7 @@ class Run:
         self.started = time.time()
 
     def add(self, group, name, status, detail="", ms=None):
-        self.checks.append({"name": name, "group": group, "status": status, "detail": str(detail)[:300],
+        self.checks.append({"name": name, "group": group, "status": status, "detail": redact(str(detail))[:300],
                             "ms": None if ms is None else round(ms)})
 
     def check(self, group, name, fn):
@@ -75,6 +75,19 @@ class Run:
             "ok": sum(1 for c in self.checks if c["status"] == "ok"),
             "failed": failed, "warnings": warned, "checks": self.checks,
         }
+
+
+def redact(text, values=None):
+    """Removes secret values (secrets file, e.g. the DQS key inside DNS names of resolver errors) from a detail.
+    The result goes to the journal, which every project can read for node.selftest."""
+    if values is None:
+        try:
+            values = secrets.load().values()
+        except OSError:
+            values = []
+    for v in sorted((v for v in values if len(v) >= 8), key=len, reverse=True):
+        text = text.replace(v, "<redacted>")
+    return text
 
 
 def iso(ts):

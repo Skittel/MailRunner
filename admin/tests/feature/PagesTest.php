@@ -47,10 +47,10 @@ final class PagesTest extends CIUnitTestCase
             'counts' => ['messages_24h' => 5, 'messages_unacked' => 2, 'role_mails_unacked' => 1, 'smtp_sessions_24h' => 9]];
         $this->db->table('users')->insert(['entra_oid' => '00000000-0000-0000-0000-000000000001', 'tenant_id' => '00000000-0000-0000-0000-000000000002',
             'name' => 'Test Admin', 'email' => 'admin@example.org', 'created_at' => $now]);
-        $this->db->table('nodes')->insert(['node_key' => 'node1.eu', 'name' => 'Node 1', 'base_url' => 'https://node1.invalid', 'enabled' => 1,
+        $this->db->table('nodes')->insert(['public_id' => 'n0de-0001', 'node_key' => 'node1.eu', 'name' => 'Node 1', 'base_url' => 'https://node1.invalid', 'enabled' => 1,
             'last_checked_at' => $now, 'last_ok_at' => $now, 'last_status' => json_encode($status), 'created_at' => $now, 'updated_at' => $now]);
-        $this->db->table('customers')->insert(['customer_key' => 'acme', 'name' => 'ACME GmbH', 'enabled' => 1, 'created_at' => $now, 'updated_at' => $now]);
-        $this->db->table('projects')->insert(['customer_id' => 1, 'node_id' => 1, 'project_key' => 'inbox', 'name' => 'Inbox', 'profile' => 'analysis',
+        $this->db->table('customers')->insert(['public_id' => 'cu5t-0001', 'customer_key' => 'acme', 'name' => 'ACME GmbH', 'enabled' => 1, 'created_at' => $now, 'updated_at' => $now]);
+        $this->db->table('projects')->insert(['public_id' => 'pr0j-0001', 'customer_id' => 1, 'node_id' => 1, 'project_key' => 'inbox', 'name' => 'Inbox', 'profile' => 'analysis',
             'enabled' => 1, 'routes' => '["in.example.org"]', 'settings' => '{"journal_scope":"own","role_mail":"api"}', 'changed_at' => $now, 'created_at' => $now]);
     }
 
@@ -69,9 +69,9 @@ final class PagesTest extends CIUnitTestCase
 
     public function testPagesRender(): void
     {
-        foreach (['/' => 'Übersicht', 'nodes' => 'node1.eu', 'nodes/1' => 'smtp.v4.certificate', 'nodes/new' => 'Node-ID',
-            'customers' => 'ACME GmbH', 'customers/1' => 'Inbox', 'customers/new' => 'Schlüssel', 'customers/1/projects/new' => 'Projekt anlegen',
-            'projects/1' => 'in.example.org', 'role-mails' => 'postmaster', 'audit' => 'Protokoll'] as $uri => $text) {
+        foreach (['/' => 'Übersicht', 'nodes' => 'node1.eu', 'nodes/n0de-0001' => 'smtp.v4.certificate', 'nodes/new' => 'Node-ID',
+            'customers' => 'ACME GmbH', 'customers/cu5t-0001' => 'Inbox', 'customers/new' => 'Schlüssel', 'customers/cu5t-0001/projects/new' => 'Projekt anlegen',
+            'projects/pr0j-0001' => 'in.example.org', 'role-mails' => 'postmaster', 'audit' => 'Protokoll'] as $uri => $text) {
             $r = $this->withSession($this->admin)->get($uri);
             $r->assertStatus(200);
             $r->assertSee($text);
@@ -79,8 +79,8 @@ final class PagesTest extends CIUnitTestCase
         // health from the stored status: failed self test -> Fehler
         $this->withSession($this->admin)->get('nodes/cards')->assertSee('Fehler');
         // node calls fail here and are shown as errors
-        $this->withSession($this->admin)->get('nodes/1/journal')->assertSee('Journal nicht abrufbar');
-        $this->withSession($this->admin)->get('role-mails/node/1')->assertSee('Node nicht abrufbar');
+        $this->withSession($this->admin)->get('nodes/n0de-0001/journal')->assertSee('Journal nicht abrufbar');
+        $this->withSession($this->admin)->get('role-mails/node/n0de-0001')->assertSee('Node nicht abrufbar');
     }
 
     public function testCustomerValidation(): void
@@ -97,13 +97,13 @@ final class PagesTest extends CIUnitTestCase
 
     public function testProjectFormValidationAndSyncErrorShown(): void
     {
-        $r = $this->postAs('customers/1/projects', ['project_key' => 'x', 'node_id' => 99, 'routes' => 'not a domain']);
+        $r = $this->postAs('customers/cu5t-0001/projects', ['project_key' => 'x', 'node_id' => 'zzzz-9999', 'routes' => 'not a domain']);
         $r->assertSee('Ungültige Route');
         $r->assertSee('Bitte eine Node wählen');
-        $r = $this->postAs('customers/1/projects', ['project_key' => 'support', 'node_id' => 1, 'profile' => 'analysis',
+        $r = $this->postAs('customers/cu5t-0001/projects', ['project_key' => 'support', 'node_id' => 'n0de-0001', 'profile' => 'analysis',
             'routes' => "support.example.org\nPostmaster@Other.example.org", 'role_mail' => 'forward']);
         $r->assertSee('gültige Adresse');
-        $r = $this->postAs('customers/1/projects', ['project_key' => 'support', 'node_id' => 1, 'profile' => 'analysis',
+        $r = $this->postAs('customers/cu5t-0001/projects', ['project_key' => 'support', 'node_id' => 'n0de-0001', 'profile' => 'analysis',
             'routes' => 'support.example.org', 'journal_scope' => 'connections']);
         $r->assertRedirect();
         $row = $this->db->table('projects')->where('project_key', 'support')->get()->getRowArray();
@@ -114,7 +114,7 @@ final class PagesTest extends CIUnitTestCase
     public function testReadOnlyUserSeesButCannotChange(): void
     {
         $ro = ['access' => 'ro'] + $this->admin;
-        $r  = $this->withSession($ro)->get('projects/1');
+        $r  = $this->withSession($ro)->get('projects/pr0j-0001');
         $r->assertStatus(200);
         $r->assertSee('in.example.org');
         $r->assertSee('disabled');
@@ -122,12 +122,27 @@ final class PagesTest extends CIUnitTestCase
         $r->assertDontSee('Erneut übertragen');
         $r->assertSee('Lesen');
         $this->withSession($ro)->get('customers')->assertDontSee('Kunde anlegen');
-        $this->withSession($ro)->get('nodes/1')->assertDontSee('Konfiguration übernehmen');
-        $this->withSession($ro)->get('projects/1/tokens')->assertDontSee('Sperren');
+        $this->withSession($ro)->get('nodes/n0de-0001')->assertDontSee('Konfiguration übernehmen');
+        $this->withSession($ro)->get('projects/pr0j-0001/tokens')->assertDontSee('Sperren');
 
         $r = $this->withSession($ro)->post('customers', ['customer_key' => 'ro-corp', 'name' => 'RO', 'csrf_test_name' => 'testtoken0123456789abcdef']);
         $r->assertStatus(403);
         $this->dontSeeInDatabase('customers', ['customer_key' => 'ro-corp']);
+    }
+
+    public function testUrlsUsePublicIdsOnly(): void
+    {
+        $r = $this->withSession($this->admin)->get('customers/cu5t-0001');
+        $r->assertSee('/projects/pr0j-0001');
+        $r->assertDontSee('/projects/1"');
+        foreach (['projects/1', 'projects/aaaa-0000'] as $uri) { // numeric ids have no route; unknown public ids are 404
+            try {
+                $this->withSession($this->admin)->get($uri);
+                $this->fail($uri . ' should be 404');
+            } catch (\CodeIgniter\Exceptions\PageNotFoundException) {
+            }
+        }
+        $this->assertMatchesRegularExpression('/^[0-9a-z]{4}-[0-9a-z]{4}$/', \App\Libraries\PublicId::generate('projects'));
     }
 
     public function testAccessFromGroups(): void

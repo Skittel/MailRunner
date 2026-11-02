@@ -4,7 +4,7 @@
 <?php foreach ($mails as $m): ?>
 <tr>
     <td class="text-nowrap small"><?= dt($m['received_at']) ?></td><td><span class="badge bg-purple-lt"><?= esc($m['role']) ?></span> <span class="small mono"><?= esc($m['envelope']['rcpt']) ?></span></td>
-    <td class="small"><?= esc($m['header']['from'] ?? $m['envelope']['mail_from']) ?></td><td><a href="/role-mails/<?= $node['id'] ?>/<?= esc($m['message_id'], 'url') ?>"><?= esc($m['header']['subject'] ?? '(kein Betreff)') ?></a></td>
+    <td class="small"><?= esc($m['header']['from'] ?? $m['envelope']['mail_from']) ?></td><td><a href="/role-mails/<?= $node['public_id'] ?>/<?= esc($m['message_id'], 'url') ?>"><?= esc($m['header']['subject'] ?? '(kein Betreff)') ?></a></td>
     <td class="mono small"><?= esc($m['project']) ?></td>
     <td><?= $m['content_deleted_at'] ? '<span class="badge bg-secondary-lt">gelöscht</span>' : ($m['acked_at'] ? '<span class="badge bg-green-lt">abgeholt</span>' : '<span class="badge bg-yellow-lt">offen</span>') ?></td></tr>
 <?php endforeach ?>

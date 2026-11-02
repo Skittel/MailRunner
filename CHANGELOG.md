@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.3 - 2026-11-02
+- Admin: URLs use random public ids (`xxxx-xxxx`) for nodes, customers and projects instead of the
+  numeric database ids (migration `PublicIds` backfills existing rows). Numeric ids give 404.
+- Self test: secret values (secrets file, e.g. the Spamhaus DQS key inside DNS names of resolver errors)
+  are redacted from check details. `node.selftest` is visible to every project.
+- Node: project/customer updates journal only fields that really changed; an unchanged PUT from the admin
+  creates no revision and no journal entry.
+
 ## 0.1.2 - 2026-11-02
 - Admin: group membership is checked at sign-in with Microsoft Graph (`POST /me/checkMemberGroups`,
   transitive, delegated permission `User.Read` only). No groups claim / token configuration needed.

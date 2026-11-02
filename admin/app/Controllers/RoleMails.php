@@ -2,6 +2,8 @@
 
 namespace App\Controllers;
 
+use App\Libraries\PublicId;
+
 use App\Libraries\Audit;
 use App\Libraries\MailView;
 use App\Libraries\Sync;
@@ -26,8 +28,9 @@ class RoleMails extends BaseController
     }
 
     /** htmx partial: list of one node. */
-    public function list(int $nodeId)
+    public function list(string $nodePid)
     {
+        $nodeId = PublicId::id('nodes', $nodePid);
         $node = $this->node($nodeId);
         try {
             $data = $this->sync()->client($node)->ok('GET', 'role-mails?limit=100')['data'];
@@ -38,8 +41,9 @@ class RoleMails extends BaseController
         return view('rolemails/_list', ['node' => $node, 'mails' => $data, 'error' => null]);
     }
 
-    public function show(int $nodeId, string $messageId)
+    public function show(string $nodePid, string $messageId)
     {
+        $nodeId = PublicId::id('nodes', $nodePid);
         $node = $this->node($nodeId);
         try {
             $client = $this->sync()->client($node);
@@ -53,8 +57,9 @@ class RoleMails extends BaseController
         return view('rolemails/show', ['node' => $node, 'msg' => $msg, 'mail' => $view]);
     }
 
-    public function raw(int $nodeId, string $messageId)
+    public function raw(string $nodePid, string $messageId)
     {
+        $nodeId = PublicId::id('nodes', $nodePid);
         $node = $this->node($nodeId);
         $raw  = $this->sync()->client($node)->raw('messages/' . rawurlencode($messageId) . '/raw');
         Audit::log('rolemail.download', $node['node_key'] . ' ' . $messageId);

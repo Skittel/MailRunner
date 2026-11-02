@@ -97,7 +97,7 @@ class Sync
         $now    = Clock::now();
         foreach ($client->ok('GET', 'customers')['data'] as $c) {
             if ($db->table('customers')->where('customer_key', $c['key'])->countAllResults() === 0) {
-                $db->table('customers')->insert(['customer_key' => $c['key'], 'name' => $c['name'], 'enabled' => $c['enabled'] ? 1 : 0, 'created_at' => $now, 'updated_at' => $now]);
+                $db->table('customers')->insert(['public_id' => PublicId::generate('customers'), 'customer_key' => $c['key'], 'name' => $c['name'], 'enabled' => $c['enabled'] ? 1 : 0, 'created_at' => $now, 'updated_at' => $now]);
                 $stats['customers']++;
             }
         }
@@ -107,7 +107,7 @@ class Sync
                 continue;
             }
             $db->table('projects')->insert([
-                'customer_id' => $customerId, 'node_id' => $node['id'], 'project_key' => $p['project'], 'name' => $p['name'],
+                'public_id' => PublicId::generate('projects'), 'customer_id' => $customerId, 'node_id' => $node['id'], 'project_key' => $p['project'], 'name' => $p['name'],
                 'profile' => $p['profile'], 'enabled' => $p['enabled'] ? 1 : 0, 'routes' => json_encode($p['routes']),
                 'settings' => json_encode($p['settings']), 'changed_at' => $now, 'synced_at' => $now, 'node_revision' => $p['revision'], 'created_at' => $now,
             ]);

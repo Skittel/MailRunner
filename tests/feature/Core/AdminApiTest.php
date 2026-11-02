@@ -78,6 +78,14 @@ final class AdminApiTest extends CIUnitTestCase
 
         [$s, $b] = $this->api('put', 'admin/v1/projects/acme/inbound', $config);
         $this->assertSame([200, false], [$s, $b['created']]);
+        $this->assertSame($rev, $b['data']['revision']); // same desired state: no new revision
+        $updates = $this->db->table('journal')->where('event', 'project.updated')->countAllResults();
+        $config['settings']['journal_scope'] = 'unassigned';
+        [$s, $b] = $this->api('put', 'admin/v1/projects/acme/inbound', $config);
+        $this->assertSame('unassigned', $b['data']['settings']['journal_scope']);
+        $last = $this->db->table('journal')->where('event', 'project.updated')->orderBy('id', 'DESC')->get(1)->getRowArray();
+        $this->assertSame(['journal_scope'], json_decode($last['details'], true)['changed']);
+        $this->assertSame($updates + 1, $this->db->table('journal')->where('event', 'project.updated')->countAllResults());
 
         [$s, $b] = $this->api('put', 'admin/v1/projects/acme/inbound', ['profile' => 'checked']);
         $this->assertSame([422, 'PROFILE_IMMUTABLE'], [$s, $b['error']['code']]);

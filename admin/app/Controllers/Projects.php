@@ -2,6 +2,8 @@
 
 namespace App\Controllers;
 
+use App\Libraries\PublicId;
+
 use App\Libraries\Audit;
 use App\Libraries\Clock;
 use App\Libraries\Sync;
@@ -19,64 +21,70 @@ class Projects extends BaseController
         return new Sync(config('Admin'));
     }
 
-    public function new(int $customerId)
+    public function new(string $customerPid)
     {
+        $customerId = PublicId::id('customers', $customerPid);
         $c = db_connect()->table('customers')->where('id', $customerId)->get()->getRowArray() ?? throw \CodeIgniter\Exceptions\PageNotFoundException::forPageNotFound();
 
         return view('projects/form', ['customer' => $c, 'project' => null, 'errors' => [], 'nodes' => $this->nodes()]);
     }
 
-    public function create(int $customerId)
+    public function create(string $customerPid)
     {
+        $customerId = PublicId::id('customers', $customerPid);
         $c = db_connect()->table('customers')->where('id', $customerId)->get()->getRowArray() ?? throw \CodeIgniter\Exceptions\PageNotFoundException::forPageNotFound();
         [$row, $errors] = $this->fromForm(null, $customerId);
         if ($errors !== []) {
             return view('projects/form', ['customer' => $c, 'project' => $row, 'errors' => $errors, 'nodes' => $this->nodes()]);
         }
         $now = Clock::now();
-        db_connect()->table('projects')->insert($row + ['customer_id' => $customerId, 'changed_at' => $now, 'created_at' => $now]);
+        db_connect()->table('projects')->insert($row + ['public_id' => PublicId::generate('projects'), 'customer_id' => $customerId, 'changed_at' => $now, 'created_at' => $now]);
         $id = (int) db_connect()->insertID();
         Audit::log('project.created', $c['customer_key'] . '/' . $row['project_key']);
         $err = $this->sync()->pushProject($id);
 
-        return redirect()->to(site_url('projects/' . $id))->with($err === null ? 'ok' : 'error', $err === null ? 'Projekt angelegt und auf die Node übertragen.' : 'Angelegt, Übertragung fehlgeschlagen: ' . $err);
+        return redirect()->to(site_url('projects/' . self::pid('projects', $id)))->with($err === null ? 'ok' : 'error', $err === null ? 'Projekt angelegt und auf die Node übertragen.' : 'Angelegt, Übertragung fehlgeschlagen: ' . $err);
     }
 
-    public function show(int $id)
+    public function show(string $pid)
     {
+        $id = PublicId::id('projects', $pid);
         $p = $this->find($id);
 
-        return view('projects/form', ['customer' => ['id' => $p['customer_id'], 'customer_key' => $p['customer_key'], 'name' => $p['customer_name']],
+        return view('projects/form', ['customer' => ['id' => $p['customer_id'], 'public_id' => $p['customer_public_id'], 'customer_key' => $p['customer_key'], 'name' => $p['customer_name']],
             'project' => $p, 'errors' => [], 'nodes' => $this->nodes()]);
     }
 
-    public function update(int $id)
+    public function update(string $pid)
     {
+        $id = PublicId::id('projects', $pid);
         $p = $this->find($id);
         [$row, $errors] = $this->fromForm($p, (int) $p['customer_id']);
         if ($errors !== []) {
-            return view('projects/form', ['customer' => ['id' => $p['customer_id'], 'customer_key' => $p['customer_key'], 'name' => $p['customer_name']],
+            return view('projects/form', ['customer' => ['id' => $p['customer_id'], 'public_id' => $p['customer_public_id'], 'customer_key' => $p['customer_key'], 'name' => $p['customer_name']],
                 'project' => $row + $p, 'errors' => $errors, 'nodes' => $this->nodes()]);
         }
         db_connect()->table('projects')->where('id', $id)->update($row + ['changed_at' => Clock::now()]);
         Audit::log('project.updated', $p['customer_key'] . '/' . $p['project_key']);
         $err = $this->sync()->pushProject($id);
 
-        return redirect()->to(site_url('projects/' . $id))->with($err === null ? 'ok' : 'error', $err === null ? 'Gespeichert und übertragen.' : 'Gespeichert, Übertragung fehlgeschlagen: ' . $err);
+        return redirect()->to(site_url('projects/' . self::pid('projects', $id)))->with($err === null ? 'ok' : 'error', $err === null ? 'Gespeichert und übertragen.' : 'Gespeichert, Übertragung fehlgeschlagen: ' . $err);
     }
 
-    public function push(int $id)
+    public function push(string $pid)
     {
+        $id = PublicId::id('projects', $pid);
         $p   = $this->find($id);
         $err = $this->sync()->pushProject($id);
         Audit::log('project.pushed', $p['customer_key'] . '/' . $p['project_key'], ['error' => $err]);
 
-        return redirect()->to(site_url('projects/' . $id))->with($err === null ? 'ok' : 'error', $err === null ? 'Übertragen.' : 'Übertragung fehlgeschlagen: ' . $err);
+        return redirect()->to(site_url('projects/' . self::pid('projects', $id)))->with($err === null ? 'ok' : 'error', $err === null ? 'Übertragen.' : 'Übertragung fehlgeschlagen: ' . $err);
     }
 
     /** htmx partial: API tokens of the project (live from the node). */
-    public function tokens(int $id)
+    public function tokens(string $pid)
     {
+        $id = PublicId::id('projects', $pid);
         $p = $this->find($id);
         try {
             $data = $this->sync()->client($this->node($p))->ok('GET', 'projects/' . $p['customer_key'] . '/' . $p['project_key'])['data'];
@@ -87,8 +95,9 @@ class Projects extends BaseController
         return view('projects/_tokens', ['project' => $p, 'tokens' => $data['tokens'], 'created' => null]);
     }
 
-    public function createToken(int $id)
+    public function createToken(string $pid)
     {
+        $id = PublicId::id('projects', $pid);
         $p     = $this->find($id);
         $label = trim((string) $this->request->getPost('label'));
         $days  = (int) $this->request->getPost('expires_days');
@@ -104,8 +113,9 @@ class Projects extends BaseController
         return view('projects/_tokens', ['project' => $p, 'tokens' => $tokens, 'created' => $created]);
     }
 
-    public function revokeToken(int $id, string $tokenId)
+    public function revokeToken(string $pid, string $tokenId)
     {
+        $id = PublicId::id('projects', $pid);
         $p = $this->find($id);
         try {
             $client = $this->sync()->client($this->node($p));
@@ -153,7 +163,7 @@ class Projects extends BaseController
         if ($existing === null) {
             $row['project_key'] = (string) ($f['project_key'] ?? '');
             $row['profile']     = array_key_exists($f['profile'] ?? '', self::PROFILES) ? $f['profile'] : 'analysis';
-            $row['node_id']     = (int) ($f['node_id'] ?? 0);
+            $row['node_id']     = (int) db_connect()->table('nodes')->select('id')->where('public_id', (string) ($f['node_id'] ?? ''))->get()->getRow('id');
             if (! preg_match(Customers::KEY, $row['project_key'])) {
                 $errors['project_key'] = '3-40 Zeichen: a-z, 0-9, „-“';
             } elseif (db_connect()->table('projects')->where('customer_id', $customerId)->where('project_key', $row['project_key'])->countAllResults() > 0) {
@@ -173,7 +183,7 @@ class Projects extends BaseController
      */
     private function find(int $id): array
     {
-        return db_connect()->table('projects p')->select('p.*, c.customer_key, c.name AS customer_name, n.node_key, n.name AS node_name')
+        return db_connect()->table('projects p')->select('p.*, c.customer_key, c.public_id AS customer_public_id, c.name AS customer_name, n.node_key, n.name AS node_name')
             ->join('customers c', 'c.id = p.customer_id')->join('nodes n', 'n.id = p.node_id')->where('p.id', $id)->get()->getRowArray()
             ?? throw \CodeIgniter\Exceptions\PageNotFoundException::forPageNotFound();
     }
@@ -186,5 +196,10 @@ class Projects extends BaseController
     private function nodes(): array
     {
         return db_connect()->table('nodes')->where('enabled', 1)->orderBy('node_key')->get()->getResultArray();
+    }
+
+    private static function pid(string $table, int $id): string
+    {
+        return (string) db_connect()->table($table)->select('public_id')->where('id', $id)->get()->getRow('public_id');
     }
 }
