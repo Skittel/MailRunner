@@ -2,6 +2,7 @@
 
 namespace App\Controllers;
 
+use App\Libraries\Enrollment;
 use App\Libraries\PublicId;
 
 use App\Libraries\Audit;
@@ -146,6 +147,48 @@ class Nodes extends BaseController
      *
      * @return array<string, string>
      */
+    /** Form: node id, host name, MX names -> one-time token and install guide. */
+    public function enrollForm()
+    {
+        return view('nodes/enroll', ['data' => ['node_key' => '', 'hostname' => '', 'mx_names' => ''], 'errors' => [], 'token' => null]);
+    }
+
+    public function enroll()
+    {
+        $d      = array_map(static fn ($v) => strtolower(trim((string) $v)), $this->request->getPost(['node_key', 'hostname', 'mx_names']));
+        $errors = [];
+        if (! preg_match(Enrollment::NODE_KEY, $d['node_key'])) {
+            $errors['node_key'] = 'z. B. node2.eu';
+        } elseif (db_connect()->table('nodes')->where('node_key', $d['node_key'])->countAllResults() > 0) {
+            $errors['node_key'] = 'Diese Node gibt es schon.';
+        }
+        if (! preg_match(Enrollment::HOSTNAME, $d['hostname'])) {
+            $errors['hostname'] = 'Vollständiger Hostname, z. B. node2.eu.example.net';
+        }
+        if ($d['mx_names'] !== '' && ! preg_match('/^([a-z0-9.-]+=(4|6|46)\s*)+$/', $d['mx_names'])) {
+            $errors['mx_names'] = 'Format: name=46 name4=4 name6=6';
+        }
+        if ($errors !== []) {
+            return view('nodes/enroll', ['data' => $d, 'errors' => $errors, 'token' => null]);
+        }
+        $token = Enrollment::create($d['node_key'], $d['hostname']);
+        Audit::log('node.enroll_token', $d['node_key'], ['hostname' => $d['hostname'], 'valid_minutes' => Enrollment::TTL_MINUTES]);
+
+        return view('nodes/enroll', ['data' => $d, 'errors' => [], 'token' => $token, 'version' => self::version(),
+            'adminUrl' => rtrim(base_url(), '/')]);
+    }
+
+    private static function version(): string
+    {
+        foreach ([ROOTPATH . 'VERSION', ROOTPATH . '../VERSION'] as $f) {
+            if (is_file($f)) {
+                return trim((string) file_get_contents($f));
+            }
+        }
+
+        return '';
+    }
+
     private function validateNode(array $d): array
     {
         $e = [];

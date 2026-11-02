@@ -51,8 +51,74 @@ class Projects extends BaseController
         $id = PublicId::id('projects', $pid);
         $p = $this->find($id);
 
+        $moveOld = $p['move_from_node_id'] ? ['node' => db_connect()->table('nodes')->where('id', $p['move_from_node_id'])->get()->getRowArray(),
+            'state' => $this->sync()->projectOnNode($id, (int) $p['move_from_node_id'])] : null;
+
         return view('projects/form', ['customer' => ['id' => $p['customer_id'], 'public_id' => $p['customer_public_id'], 'customer_key' => $p['customer_key'], 'name' => $p['customer_name']],
-            'project' => $p, 'errors' => [], 'nodes' => $this->nodes()]);
+            'project' => $p, 'errors' => [], 'nodes' => $this->nodes(), 'moveOld' => $moveOld]);
+    }
+
+    /**
+     * Move step 1: the project is created on the target node (active) and becomes its node; the old node keeps
+     * accepting until the MX records point to the new node and the application uses the new node's API.
+     */
+    public function move(string $pid)
+    {
+        $id     = PublicId::id('projects', $pid);
+        $p      = $this->find($id);
+        $ref    = $p['customer_key'] . '/' . $p['project_key'];
+        $target = (int) db_connect()->table('nodes')->select('id')->where('public_id', (string) $this->request->getPost('node_id'))->get()->getRow('id');
+        if ($p['move_from_node_id'] !== null || $target === 0 || $target === (int) $p['node_id']) {
+            return redirect()->to(site_url('projects/' . $pid))->with('error', 'Bitte eine andere Node wählen (kein Umzug aktiv).');
+        }
+        $db = db_connect();
+        $db->table('projects')->where('id', $id)->update(['node_id' => $target, 'move_from_node_id' => $p['node_id'], 'changed_at' => Clock::now()]);
+        $err = $this->sync()->pushProject($id);
+        if ($err !== null) {
+            $db->table('projects')->where('id', $id)->update(['node_id' => $p['node_id'], 'move_from_node_id' => null]);
+            $this->sync()->pushProject($id);
+            Audit::log('project.move_failed', $ref, ['error' => $err]);
+
+            return redirect()->to(site_url('projects/' . $pid))->with('error', 'Umzug nicht gestartet, neue Node meldet: ' . $err);
+        }
+        Audit::log('project.move_started', $ref, ['from' => (int) $p['node_id'], 'to' => $target]);
+
+        return redirect()->to(site_url('projects/' . $pid))->with('ok', 'Projekt auf der neuen Node angelegt. Die alte Node nimmt weiter an, bis du sie abschaltest.');
+    }
+
+    /** Move step 2: disable the project on the old node (after DNS switch and API switch of the application). */
+    public function moveFinish(string $pid)
+    {
+        $id = PublicId::id('projects', $pid);
+        $p  = $this->find($id);
+        if ($p['move_from_node_id'] === null) {
+            return redirect()->to(site_url('projects/' . $pid));
+        }
+        $err = $this->sync()->pushProject($id, (int) $p['move_from_node_id'], false);
+        if ($err !== null) {
+            return redirect()->to(site_url('projects/' . $pid))->with('error', 'Alte Node nicht erreichbar: ' . $err);
+        }
+        db_connect()->table('projects')->where('id', $id)->update(['move_from_node_id' => null, 'changed_at' => Clock::now()]);
+        Audit::log('project.move_finished', $p['customer_key'] . '/' . $p['project_key'], ['old_node' => (int) $p['move_from_node_id']]);
+
+        return redirect()->to(site_url('projects/' . $pid))->with('ok', 'Umzug abgeschlossen: Das Projekt ist auf der alten Node deaktiviert.');
+    }
+
+    /** Cancel a move: disable on the new node, the old node is the project's node again. */
+    public function moveCancel(string $pid)
+    {
+        $id = PublicId::id('projects', $pid);
+        $p  = $this->find($id);
+        if ($p['move_from_node_id'] === null) {
+            return redirect()->to(site_url('projects/' . $pid));
+        }
+        $errNew = $this->sync()->pushProject($id, (int) $p['node_id'], false);
+        db_connect()->table('projects')->where('id', $id)->update(['node_id' => $p['move_from_node_id'], 'move_from_node_id' => null, 'changed_at' => Clock::now()]);
+        $errOld = $this->sync()->pushProject($id);
+        Audit::log('project.move_cancelled', $p['customer_key'] . '/' . $p['project_key'], ['new_node_error' => $errNew, 'old_node_error' => $errOld]);
+
+        return redirect()->to(site_url('projects/' . $pid))->with($errNew === null && $errOld === null ? 'ok' : 'error',
+            $errNew === null && $errOld === null ? 'Umzug abgebrochen.' : 'Umzug abgebrochen, aber: ' . trim(($errNew ?? '') . ' ' . ($errOld ?? '')));
     }
 
     public function update(string $pid)

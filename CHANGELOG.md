@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.7 - 2026-11-02
+- `install.sh` on a fresh server: gets the Let's Encrypt certificate itself (webroot, host name plus all MX
+  names, optional `--le-email`), installs the renewal hook (reload nginx/Postfix), port-80 vhost serves all
+  certificate names.
+- Node enrollment: MailRunner Admin -> Nodes -> "Neue Node einrichten" shows the install commands with a
+  one-time token (60 min). `install.sh --admin-url=... --enroll-token=...` fetches the admin CA
+  (`GET /enroll/ca.pem`) and registers the node (`POST /enroll`); only the token hash is stored.
+- Project move between nodes (admin project page): create on the new node, old node keeps accepting until
+  "Alte Node abschalten" (or "Umzug abbrechen"). Shows open mails on the old node; node admin API project
+  detail has `messages_unacked`.
+
 ## 0.1.6 - 2026-11-02
 - `mr:secrets:scan --accept`: accepts the current findings (e.g. on a development node), journal event
   `node.secrets_accepted`. Accepted findings no longer fail `base.secret_leak` (detail shows the number).

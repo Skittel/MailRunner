@@ -157,6 +157,60 @@ final class PagesTest extends CIUnitTestCase
         $this->withSession($this->admin)->get('role-mails')->assertSee('Keine Datensätze');
     }
 
+    public function testEnrollmentTokenGuideAndRegistration(): void
+    {
+        $this->withSession($this->admin)->get('nodes/enroll')->assertSee('Anleitung und Token erzeugen');
+        $r = $this->postAs('nodes/enroll', ['node_key' => 'node1.eu', 'hostname' => 'x', 'mx_names' => 'bad']);
+        $r->assertSee('Diese Node gibt es schon');
+        $r->assertSee('Vollständiger Hostname');
+        $r->assertSee('Format: name=46');
+
+        $r = $this->postAs('nodes/enroll', ['node_key' => 'node2.eu', 'hostname' => 'node2.eu.example.net', 'mx_names' => 'node2.eu.example.net=46']);
+        $r->assertSee('--enroll-token=mre_');
+        $r->assertSee('--mx-names="node2.eu.example.net=46"');
+        preg_match('/--enroll-token=(mre_[A-Za-z0-9_-]+)/', $r->getBody(), $m);
+        $token = $m[1];
+        $this->dontSeeInDatabase('node_enrollments', ['token_hash' => $token]); // only the hash is stored
+        $this->seeInDatabase('node_enrollments', ['token_hash' => hash('sha256', $token), 'used_at' => null]);
+
+        // no session needed, but a valid token; CSRF does not apply
+        $this->withHeaders(['Authorization' => 'Bearer mre_wrongwrongwrongwrongwrong'])->get('enroll/ca.pem')->assertStatus(401);
+        $this->withHeaders(['Authorization' => 'Bearer ' . $token])->get('enroll/ca.pem')->assertStatus(200);
+        $bad = $this->withHeaders(['Authorization' => 'Bearer ' . $token])->withBodyFormat('json')
+            ->post('enroll', ['node_id' => 'other.eu', 'base_url' => 'https://node2.eu.example.net']);
+        $bad->assertStatus(422);
+        $ok = $this->withHeaders(['Authorization' => 'Bearer ' . $token])->withBodyFormat('json')
+            ->post('enroll', ['node_id' => 'node2.eu', 'base_url' => 'https://node2.eu.example.net', 'version' => '0.1.7']);
+        $ok->assertStatus(201);
+        $this->seeInDatabase('nodes', ['node_key' => 'node2.eu', 'base_url' => 'https://node2.eu.example.net']);
+        $this->seeInDatabase('audit_log', ['action' => 'node.enrolled', 'object' => 'node2.eu']);
+        // single use
+        $this->withHeaders(['Authorization' => 'Bearer ' . $token])->withBodyFormat('json')
+            ->post('enroll', ['node_id' => 'node2.eu', 'base_url' => 'https://node2.eu.example.net'])->assertStatus(401);
+        // read-only users cannot create tokens
+        $this->withSession(['access' => 'ro'] + $this->admin)->post('nodes/enroll', ['node_key' => 'n3.eu', 'hostname' => 'n3.example.net',
+            'csrf_test_name' => 'testtoken0123456789abcdef'])->assertStatus(403);
+    }
+
+    public function testProjectMove(): void
+    {
+        $now = '2026-11-02 08:00:00.000000';
+        $this->db->table('nodes')->insert(['public_id' => 'n0de-0002', 'node_key' => 'node2.eu', 'name' => 'Node 2', 'base_url' => 'https://node2.invalid',
+            'enabled' => 1, 'created_at' => $now, 'updated_at' => $now]);
+        $this->withSession($this->admin)->get('projects/pr0j-0001')->assertSee('Auf andere Node umziehen');
+        // the new node is unreachable in tests: the move is not started and nothing changes
+        $r = $this->postAs('projects/pr0j-0001/move', ['node_id' => 'n0de-0002']);
+        $r->assertRedirect();
+        $this->seeInDatabase('projects', ['public_id' => 'pr0j-0001', 'node_id' => 1, 'move_from_node_id' => null]);
+        $this->seeInDatabase('audit_log', ['action' => 'project.move_failed']);
+        // a running move shows the steps and the buttons
+        $this->db->table('projects')->where('id', 1)->update(['node_id' => 2, 'move_from_node_id' => 1]);
+        $r = $this->withSession($this->admin)->get('projects/pr0j-0001');
+        $r->assertSee('Umzug von');
+        $r->assertSee('Alte Node abschalten');
+        $r->assertSee('nicht erreichbar');
+    }
+
     public function testAccessFromGroups(): void
     {
         $c = config('Admin');

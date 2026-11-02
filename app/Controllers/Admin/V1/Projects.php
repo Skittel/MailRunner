@@ -36,7 +36,10 @@ class Projects extends AdminController
             $ref = $customer . '/' . $project;
             $p   = service('projectService')->get($ref);
 
+            $unacked = db_connect()->table('receive_messages')->where('project_id', $p['id'])->where('acked_at', null)->where('content_deleted_at', null)->countAllResults();
+
             return ApiResponse::ok(['data' => self::present($p, array_column(service('routeService')->list($ref), 'route')) + [
+                'messages_unacked' => $unacked,
                 'tokens' => array_map(static fn ($t) => [
                     'token_id' => $t['token_id'], 'label' => $t['label'], 'created_at' => Time::toIso($t['created_at']),
                     'expires_at' => Time::toIso($t['expires_at']), 'revoked_at' => Time::toIso($t['revoked_at']),

@@ -44,28 +44,37 @@ class Sync
      *
      * @return string|null error message, null on success
      */
-    public function pushProject(int $projectId): ?string
+    /**
+     * Pushes the desired state of a project to its node, or with $nodeId to another node (project move:
+     * the old node, then with $enabled = false). Only a push to the project's own node updates sync state.
+     */
+    public function pushProject(int $projectId, ?int $nodeId = null, ?bool $enabled = null): ?string
     {
         $db = db_connect();
         $p  = $db->table('projects p')->select('p.*, c.customer_key, c.name AS customer_name, c.enabled AS customer_enabled')
             ->join('customers c', 'c.id = p.customer_id')->where('p.id', $projectId)->get()->getRowArray();
-        $node = $db->table('nodes')->where('id', $p['node_id'])->get()->getRowArray();
+        $own  = $nodeId === null || $nodeId === (int) $p['node_id'];
+        $node = $db->table('nodes')->where('id', $nodeId ?? $p['node_id'])->get()->getRowArray();
         try {
             $client = $this->client($node);
             $client->ok('PUT', 'customers/' . $p['customer_key'], ['name' => $p['customer_name'], 'enabled' => (bool) $p['customer_enabled']]);
             $res = $client->ok('PUT', 'projects/' . $p['customer_key'] . '/' . $p['project_key'], [
                 'profile'  => $p['profile'],
                 'name'     => $p['name'],
-                'enabled'  => (bool) $p['enabled'],
+                'enabled'  => $enabled ?? (bool) $p['enabled'],
                 'routes'   => json_decode($p['routes'], true) ?: [],
                 'settings' => json_decode($p['settings'], true) ?: [],
             ]);
-            $db->table('projects')->where('id', $projectId)->update(['synced_at' => Clock::now(), 'sync_error' => null, 'node_revision' => (int) ($res['data']['revision'] ?? 0)]);
+            if ($own) {
+                $db->table('projects')->where('id', $projectId)->update(['synced_at' => Clock::now(), 'sync_error' => null, 'node_revision' => (int) ($res['data']['revision'] ?? 0)]);
+            }
 
             return null;
         } catch (Throwable $e) {
             $msg = $e instanceof NodeError ? $e->errorCode . ': ' . $e->getMessage() : $e->getMessage();
-            $db->table('projects')->where('id', $projectId)->update(['sync_error' => mb_substr($msg, 0, 500)]);
+            if ($own) {
+                $db->table('projects')->where('id', $projectId)->update(['sync_error' => mb_substr($msg, 0, 500)]);
+            }
 
             return $msg;
         }
@@ -115,5 +124,22 @@ class Sync
         }
 
         return $stats;
+    }
+
+    /**
+     * State of a project on a node (admin API), e.g. the old node during a move. Null if unreachable.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function projectOnNode(int $projectId, int $nodeId): ?array
+    {
+        $db   = db_connect();
+        $p    = $db->table('projects p')->select('p.project_key, c.customer_key')->join('customers c', 'c.id = p.customer_id')->where('p.id', $projectId)->get()->getRowArray();
+        $node = $db->table('nodes')->where('id', $nodeId)->get()->getRowArray();
+        try {
+            return $this->client($node)->ok('GET', 'projects/' . $p['customer_key'] . '/' . $p['project_key'])['data'];
+        } catch (Throwable) {
+            return null;
+        }
     }
 }

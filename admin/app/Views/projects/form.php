@@ -59,9 +59,38 @@ $this->setVar('pretitle', '<a href="/customers/' . $customer['public_id'] . '">'
     <?php if (can_write()): ?><div class="card-footer text-end"><a href="/customers/<?= $customer['public_id'] ?>" class="btn btn-link">Abbrechen</a><button class="btn btn-primary"><?= $isNew ? 'Anlegen und übertragen' : 'Speichern und übertragen' ?></button></div><?php endif ?>
 </form>
 </div>
-<?php if (! $isNew): ?>
-<div class="col-lg-4"><div class="card"><div class="card-header"><h3 class="card-title">API-Tokens</h3></div>
-    <div id="tokens" hx-get="/projects/<?= $project['public_id'] ?>/tokens" hx-trigger="load"><div class="card-body text-secondary">Lädt …</div></div></div></div>
+<?php if (! $isNew): $moveOld ??= null; ?>
+<div class="col-lg-4">
+<div class="card mb-3"><div class="card-header"><h3 class="card-title">Node</h3></div><div class="card-body">
+    <div class="mb-2"><span class="mono"><?= esc($project['node_key']) ?></span> <span class="text-secondary small">API: <?= esc($nodeBase = (string) (array_column($nodes, 'base_url', 'id')[$project['node_id']] ?? '')) ?></span></div>
+<?php if ($moveOld !== null): $st = $moveOld['state']; ?>
+    <div class="alert alert-info mb-3">
+        <div class="fw-bold mb-1">Umzug von <span class="mono"><?= esc($moveOld['node']['node_key']) ?></span> läuft</div>
+        <ol class="mb-1 ps-3 small">
+            <li>DNS: MX der Routen-Domains auf <span class="mono"><?= esc($project['node_key']) ?></span> umstellen (TTL abwarten).</li>
+            <li>Anwendung: API-Adresse <span class="mono"><?= esc($nodeBase) ?></span> und ein neues Token dieser Node (unten) eintragen.</li>
+            <li>Alte Node: offene Mails abholen lassen.</li>
+            <li>„Alte Node abschalten“.</li>
+        </ol>
+        <div class="small">Alte Node: <?= $st === null ? '<span class="text-danger">nicht erreichbar</span>'
+            : (($st['enabled'] ? 'nimmt noch an' : 'deaktiviert') . ' · offene Mails: <strong>' . (int) ($st['messages_unacked'] ?? 0) . '</strong>') ?></div>
+    </div>
+    <?php if (can_write()): ?>
+    <form method="post" action="/projects/<?= $project['public_id'] ?>/move/finish" class="d-inline"><?= csrf_field() ?><button class="btn btn-primary btn-sm">Alte Node abschalten</button></form>
+    <form method="post" action="/projects/<?= $project['public_id'] ?>/move/cancel" class="d-inline"><?= csrf_field() ?><button class="btn btn-ghost-danger btn-sm">Umzug abbrechen</button></form>
+    <?php endif ?>
+<?php elseif (can_write() && count($nodes) > 1): ?>
+    <form method="post" action="/projects/<?= $project['public_id'] ?>/move"><?= csrf_field() ?>
+        <div class="input-group input-group-sm"><select name="node_id" class="form-select">
+            <?php foreach ($nodes as $n): if ((int) $n['id'] === (int) $project['node_id']) { continue; } ?><option value="<?= $n['public_id'] ?>"><?= esc($n['name']) ?> (<?= esc($n['node_key']) ?>)</option><?php endforeach ?>
+        </select><button class="btn btn-outline-primary">Auf andere Node umziehen</button></div>
+        <div class="form-hint">Legt das Projekt auf der neuen Node an. Die alte Node nimmt weiter an, bis du sie abschaltest.</div>
+    </form>
+<?php endif ?>
+</div></div>
+<div class="card"><div class="card-header"><h3 class="card-title">API-Tokens</h3></div>
+    <div id="tokens" hx-get="/projects/<?= $project['public_id'] ?>/tokens" hx-trigger="load"><div class="card-body text-secondary">Lädt …</div></div></div>
+</div>
 <?php endif ?>
 </div>
 <?= $this->endSection() ?>

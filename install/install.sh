@@ -2,12 +2,16 @@
 # MailRunner node installer. Idempotent: run again to deploy a new version.
 #
 #   sudo install/install.sh --role=receive --node-id=node1.eu --hostname=mx.example.net \
-#        [--mx-names="mx.example.net=46 mx4.example.net=4 mx6.example.net=6"]
+#        [--mx-names="mx.example.net=46 mx4.example.net=4 mx6.example.net=6"] [--le-email=ops@example.net] \
+#        [--admin-url=https://admin.example.net --enroll-token=TOKEN]
 #
-# Needs: Ubuntu 26.04, a Let's Encrypt certificate for --hostname (webroot /var/www/acme).
+# Needs: Ubuntu 26.04, DNS (A/AAAA) of --hostname and the MX names pointing to this server, port 80 reachable.
+# Without a certificate the installer gets one from Let's Encrypt (webroot /var/www/acme) for the host name and
+# all MX names. --enroll-token (MailRunner Admin -> Nodes -> "Neue Node", valid 60 min, single use) fetches the
+# admin CA and registers the node in MailRunner Admin.
 set -euo pipefail
 
-ROLE=""; NODE_ID=""; HOST=""; DB_NAME="mailrunner"; MX_NAMES=""; ADMIN_CA=""
+ROLE=""; NODE_ID=""; HOST=""; DB_NAME="mailrunner"; MX_NAMES=""; ADMIN_CA=""; LE_EMAIL=""; ADMIN_URL=""; ENROLL_TOKEN=""
 SOURCE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 for arg in "$@"; do
     case "$arg" in
@@ -18,19 +22,25 @@ for arg in "$@"; do
         --source=*) SOURCE="${arg#*=}" ;;
         --mx-names=*) MX_NAMES="${arg#*=}" ;;   # e.g. "mx.example.net=46 mx4.example.net=4" (self test)
         --admin-ca=*) ADMIN_CA="${arg#*=}" ;;   # CA certificate of MailRunner Admin (mTLS for /admin/v1)
+        --le-email=*) LE_EMAIL="${arg#*=}" ;;   # contact for Let's Encrypt (optional)
+        --admin-url=*) ADMIN_URL="${arg#*=}" ;; # MailRunner Admin, e.g. https://admin.example.net (enrollment)
+        --enroll-token=*) ENROLL_TOKEN="${arg#*=}" ;; # one-time enrollment token from MailRunner Admin
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 log() { echo "==> $*"; }
-render() { sed -e "s/{{HOSTNAME}}/${HOST}/g" "$1"; }
+render() { sed -e "s/{{HOSTNAME}}/${HOST}/g" -e "s/{{CERT_NAMES}}/${CERT_NAMES:-$HOST}/g" "$1"; }
 
 [[ $EUID -eq 0 ]] || die "run as root"
 [[ "$ROLE" == "receive" ]] || die "--role=receive is required (send is not implemented yet)"
 [[ "$NODE_ID" =~ ^[a-z0-9][a-z0-9.-]{1,62}$ ]] || die "--node-id is required, e.g. node1.eu"
 [[ "$HOST" =~ ^[a-z0-9.-]+\.[a-z]{2,}$ ]] || die "--hostname is required (FQDN)"
-[[ -f "/etc/letsencrypt/live/$HOST/fullchain.pem" ]] || die "no certificate for $HOST (certbot certonly --webroot -w /var/www/acme -d $HOST)"
+if [[ -n "$ENROLL_TOKEN" ]]; then
+    [[ "$ADMIN_URL" =~ ^https://[a-z0-9.-]+(:[0-9]+)?$ ]] || die "--enroll-token needs --admin-url=https://<admin host>"
+    [[ "$ENROLL_TOKEN" =~ ^[A-Za-z0-9_-]{20,80}$ ]] || die "--enroll-token: invalid format"
+fi
 [[ -f "$SOURCE/VERSION" ]] || die "source not found: $SOURCE"
 T="$SOURCE/install/templates"
 VERSION="$(cat "$SOURCE/VERSION")"
@@ -40,8 +50,41 @@ echo "postfix postfix/main_mailer_type select No configuration" | debconf-set-se
 echo "postfix postfix/mailname string $HOST" | debconf-set-selections
 DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
     postfix postfix-pcre python3-milter python3-nacl python3-dkim python3-spf python3-dnspython python3-cryptography \
-    python3-requests openssl unbound \
+    python3-requests openssl unbound certbot curl \
     php-cli php-fpm php-mysql php-intl php-mbstring php-curl php-xml composer mariadb-server nginx rsync >/dev/null
+
+log "Certificate (Let's Encrypt, webroot /var/www/acme)"
+CERT_NAMES="$HOST"
+KNOWN_MX="$MX_NAMES"
+[[ -z "$KNOWN_MX" && -f /etc/mailrunner/app.env ]] && KNOWN_MX="$(sed -n 's/^MAILRUNNER_MX_NAMES = "\(.*\)"$/\1/p' /etc/mailrunner/app.env)"
+for entry in $KNOWN_MX; do
+    name="${entry%%=*}"; [[ " $CERT_NAMES " == *" $name "* ]] || CERT_NAMES="$CERT_NAMES $name"
+done
+install -d -m 0755 /var/www/acme
+if [[ ! -f "/etc/letsencrypt/live/$HOST/fullchain.pem" ]]; then
+    # port 80 only, for the ACME challenge; the full API vhost follows once the certificate exists
+    if [[ ! -e /etc/nginx/sites-enabled/mailrunner-api ]]; then
+        sed -e "s/{{HOSTNAME}}/${CERT_NAMES}/g" "$T/web/nginx-acme.conf" > /etc/nginx/sites-available/mailrunner-acme
+        ln -sfn /etc/nginx/sites-available/mailrunner-acme /etc/nginx/sites-enabled/mailrunner-acme
+        rm -f /etc/nginx/sites-enabled/default
+        nginx -t 2>/dev/null && systemctl reload nginx
+    fi
+    LE_ARGS=(--register-unsafely-without-email)
+    [[ -n "$LE_EMAIL" ]] && LE_ARGS=(--email "$LE_EMAIL")
+    D_ARGS=(); for n in $CERT_NAMES; do D_ARGS+=(-d "$n"); done
+    certbot certonly --webroot -w /var/www/acme --cert-name "$HOST" --non-interactive --agree-tos "${LE_ARGS[@]}" "${D_ARGS[@]}" \
+        || die "Let's Encrypt failed: do the DNS names point to this server and is port 80 reachable?"
+fi
+install -d /etc/letsencrypt/renewal-hooks/deploy
+install -m 0755 "$T/web/letsencrypt-reload.sh" /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh
+
+if [[ -n "$ENROLL_TOKEN" ]]; then
+    log "Enrollment: admin CA from MailRunner Admin"
+    ENROLL_CA="$(mktemp)"
+    curl -fsS --max-time 20 -H "Authorization: Bearer $ENROLL_TOKEN" "$ADMIN_URL/enroll/ca.pem" -o "$ENROLL_CA" \
+        || die "enrollment: admin CA not available (token expired or used? create a new one in MailRunner Admin)"
+    ADMIN_CA="$ENROLL_CA"
+fi
 
 log "Self test level 1 (mail path and analysis without network)"
 # A failing test stops the installation before anything is changed.
@@ -200,6 +243,7 @@ install -m 0644 "$T/web/php-fpm-pool.conf" "$FPM_DIR/pool.d/mailrunner.conf"
 systemctl restart "$FPM_SERVICE"
 render "$T/web/nginx-api.conf" > /etc/nginx/sites-available/mailrunner-api
 ln -sfn /etc/nginx/sites-available/mailrunner-api /etc/nginx/sites-enabled/mailrunner-api
+rm -f /etc/nginx/sites-enabled/mailrunner-acme
 nginx -t 2>/dev/null
 systemctl reload nginx
 
@@ -232,6 +276,16 @@ ls -1t /opt/mailrunner/releases | tail -n +4 | while read -r old; do
     [[ "$old" == "$KEEP_CUR" || "$old" == "$KEEP_PREV" || -z "$old" ]] && continue
     rm -rf -- "/opt/mailrunner/releases/${old:?}"
 done
+
+if [[ -n "$ENROLL_TOKEN" ]]; then
+    log "Enrollment: register node in MailRunner Admin"
+    body="$(printf '{"node_id":"%s","base_url":"https://%s","version":"%s"}' "$NODE_ID" "$HOST" "$VERSION")"
+    curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $ENROLL_TOKEN" -H 'Content-Type: application/json' \
+        --data "$body" "$ADMIN_URL/enroll" >/dev/null \
+        && echo "registered as $NODE_ID in $ADMIN_URL" \
+        || echo "WARNING: registration failed - add the node in MailRunner Admin by hand (Nodes -> Node anlegen)"
+    rm -f "$ENROLL_CA"
+fi
 
 log "Status"
 runuser -u mailrunner -- php /opt/mailrunner/current/spark mr:status || true

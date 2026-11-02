@@ -100,6 +100,7 @@ final class AdminApiTest extends CIUnitTestCase
         [$s, $b2] = $this->api('get', 'admin/v1/projects/acme/inbound');
         $this->assertSame($b['data']['token_id'], $b2['data']['tokens'][0]['token_id']);
         $this->assertArrayNotHasKey('bearer', $b2['data']['tokens'][0]);
+        $this->assertSame(0, $b2['data']['messages_unacked']);
         [$s] = $this->api('delete', 'admin/v1/tokens/' . $b['data']['token_id']);
         $this->assertSame(200, $s);
 
