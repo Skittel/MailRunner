@@ -12,46 +12,42 @@ $fb  = static fn ($k) => isset($errors[$k]) ? '<div class="invalid-feedback">' .
             <div class="form-hint">Name der Node (API, Zertifikat, SMTP-Begrüßung).</div></div>
         <div class="col-md-5 mb-3"><label class="form-label">MX-Namen (optional)</label><input name="mx_names" class="form-control mono<?= $err('mx_names') ?>" value="<?= esc($data['mx_names']) ?>" placeholder="node2.eu.example.net=46 node2-ip4.example.net=4 node2-ip6.example.net=6"><?= $fb('mx_names') ?>
             <div class="form-hint">Name=IP-Versionen. Der Selbsttest prüft sie, das Zertifikat enthält sie.</div></div>
-    </div></div>
-    <div class="card-footer text-end"><a href="/nodes" class="btn btn-link">Abbrechen</a><button class="btn btn-primary">Anleitung und Token erzeugen</button></div>
+    </div>
+    <div id="enroll-dns" class="mt-2"></div></div>
+    <div class="card-footer d-flex justify-content-between">
+        <button type="button" class="btn btn-outline-secondary" hx-get="/nodes/enroll/dns" hx-include="[name=hostname],[name=mx_names]" hx-target="#enroll-dns">DNS prüfen</button>
+        <span><a href="/nodes" class="btn btn-link">Abbrechen</a><button class="btn btn-primary">Anleitung und Token erzeugen</button></span></div>
 </form>
 <?php else:
-    $repo = 'https://github.com/Skittel/MailRunner.git';
-    $mx   = $data['mx_names'] !== '' ? ' \\' . "\n    --mx-names=\"" . $data['mx_names'] . '"' : '';
-    $tag  = $version !== '' ? '--branch v' . $version . ' ' : ''; ?>
+    $dnsQuery = http_build_query(['hostname' => $data['hostname'], 'mx_names' => $data['mx_names']]); ?>
 <div class="alert alert-warning">Das Token ist <strong><?= \App\Libraries\Enrollment::TTL_MINUTES ?> Minuten</strong> gültig und nur einmal verwendbar. Es wird nicht noch einmal angezeigt.</div>
 <div class="row row-cards">
 <div class="col-lg-8">
 <div class="card mb-3"><div class="card-header"><h3 class="card-title">2. Vorbereitung</h3></div><div class="card-body">
-    <ul class="mb-0">
-        <li>Server mit <strong>Ubuntu 26.04</strong>, Zugang per SSH mit sudo.</li>
-        <li><strong>DNS:</strong> A- und AAAA-Eintrag für <span class="mono"><?= esc($data['hostname']) ?></span><?= $data['mx_names'] !== '' ? ' und alle MX-Namen' : '' ?> zeigen auf den Server.</li>
-        <li><strong>Reverse-DNS (PTR)</strong> der Server-IPs beim Provider auf <span class="mono"><?= esc($data['hostname']) ?></span> setzen.</li>
-        <li><strong>Firewall:</strong> Port 25, 80 und 443 öffentlich, alles andere nur von den Admin-Adressen (Regeln: Wiki, KI-Regeln).</li>
+    <ul>
+        <li>Server mit <strong>Ubuntu 26.04</strong>, SSH mit sudo.</li>
+        <li><strong>DNS</strong> wie unten (A/AAAA zeigen auf den Server), <strong>Reverse-DNS (PTR)</strong> beim Provider auf <span class="mono"><?= esc($data['hostname']) ?></span>.</li>
+        <li><strong>Firewall:</strong> Port 25, 80 und 443 öffentlich, alles andere nur von den Admin-Adressen.</li>
     </ul>
+    <div hx-get="/nodes/enroll/dns?<?= esc($dnsQuery, 'attr') ?>" hx-trigger="load"><div class="text-secondary small">DNS wird geprüft …</div></div>
+    <button type="button" class="btn btn-sm btn-outline-secondary mt-2" hx-get="/nodes/enroll/dns?<?= esc($dnsQuery, 'attr') ?>" hx-target="previous div">DNS erneut prüfen</button>
 </div></div>
-<div class="card mb-3"><div class="card-header"><h3 class="card-title">3. Installation auf der neuen Node</h3></div><div class="card-body">
-<pre class="mono mb-0">sudo apt-get update &amp;&amp; sudo apt-get install -y git
-sudo git clone <?= esc($tag) ?><?= esc($repo) ?> /opt/src/MailRunner
-cd /opt/src/MailRunner
-sudo install/install.sh --role=receive --node-id=<?= esc($data['node_key']) ?> \
-    --hostname=<?= esc($data['hostname']) ?><?= esc($mx) ?> \
-    --admin-url=<?= esc($adminUrl) ?> \
-    --enroll-token=<?= esc($token) ?></pre>
-    <div class="form-hint mt-2">Der Installer holt das Zertifikat bei Let's Encrypt, richtet Postfix, API und Selbsttest ein, übernimmt das CA-Zertifikat dieser Admin-Instanz und meldet die Node hier an.</div>
+<div class="card mb-3"><div class="card-header"><h3 class="card-title">3. Auf der neuen Node (ein Befehl)</h3></div><div class="card-body">
+<pre class="mono mb-2">curl -fsSL <?= esc($adminUrl) ?>/enroll/bootstrap.sh | sudo bash -s -- <?= esc($token) ?></pre>
+    <div class="form-hint">Holt MailRunner <?= esc($version) ?> und die Konfiguration dieser Node von hier, prüft DNS, holt das Zertifikat bei Let's Encrypt, installiert Postfix, API und Selbsttest, übernimmt das CA-Zertifikat dieser Admin-Instanz und meldet die Node hier an.</div>
 </div></div>
 <div class="card"><div class="card-header"><h3 class="card-title">4. Danach</h3></div><div class="card-body">
-<pre class="mono">sudo nano /etc/mailrunner/secrets.env     # Spamhaus DQS, blacklistmaster, ipregistry
-sudo mailrunner mr:selftest</pre>
+<pre class="mono">sudo nano /etc/mailrunner/secrets.env     # Spamhaus DQS, blacklistmaster, ipregistry</pre>
     <ul class="mb-0">
-        <li>Die Node erscheint unter <a href="/nodes">Nodes</a>, sobald der Installer fertig ist.</li>
-        <li>Projekte legst du beim Kunden an oder ziehst sie auf der Projektseite um („Auf andere Node umziehen“).</li>
+        <li>Die Node erscheint unter <a href="/nodes">Nodes</a>. Projekte legst du beim Kunden an oder ziehst sie auf der Projektseite um.</li>
+        <li>Ohne MailRunner Admin geht es auch: Wiki MailRunnerPub, „Installation und Umzug“.</li>
     </ul>
 </div></div>
 </div>
 <div class="col-lg-4"><div class="card"><div class="card-body">
     <div class="text-secondary small">Node-ID</div><div class="mono mb-2"><?= esc($data['node_key']) ?></div>
     <div class="text-secondary small">Hostname</div><div class="mono mb-2"><?= esc($data['hostname']) ?></div>
+    <?php if ($data['mx_names'] !== ''): ?><div class="text-secondary small">MX-Namen</div><div class="mono small mb-2"><?= esc($data['mx_names']) ?></div><?php endif ?>
     <div class="text-secondary small">Token gültig bis</div><div><?= dt(gmdate('Y-m-d H:i:s', time() + \App\Libraries\Enrollment::TTL_MINUTES * 60), 'd.m.Y H:i') ?> Uhr</div>
 </div></div></div>
 </div>

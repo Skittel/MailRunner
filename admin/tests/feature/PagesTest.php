@@ -166,9 +166,9 @@ final class PagesTest extends CIUnitTestCase
         $r->assertSee('Format: name=46');
 
         $r = $this->postAs('nodes/enroll', ['node_key' => 'node2.eu', 'hostname' => 'node2.eu.example.net', 'mx_names' => 'node2.eu.example.net=46']);
-        $r->assertSee('--enroll-token=mre_');
-        $r->assertSee('--mx-names="node2.eu.example.net=46"');
-        preg_match('/--enroll-token=(mre_[A-Za-z0-9_-]+)/', $r->getBody(), $m);
+        $r->assertSee('/enroll/bootstrap.sh | sudo bash -s -- mre_');
+        $r->assertSee('node2.eu.example.net=46');
+        preg_match('/sudo bash -s -- (mre_[A-Za-z0-9_-]+)/', $r->getBody(), $m);
         $token = $m[1];
         $this->dontSeeInDatabase('node_enrollments', ['token_hash' => $token]); // only the hash is stored
         $this->seeInDatabase('node_enrollments', ['token_hash' => hash('sha256', $token), 'used_at' => null]);
@@ -176,6 +176,17 @@ final class PagesTest extends CIUnitTestCase
         // no session needed, but a valid token; CSRF does not apply
         $this->withHeaders(['Authorization' => 'Bearer mre_wrongwrongwrongwrongwrong'])->get('enroll/ca.pem')->assertStatus(401);
         $this->withHeaders(['Authorization' => 'Bearer ' . $token])->get('enroll/ca.pem')->assertStatus(200);
+        // the node gets its whole configuration from the admin
+        $cfg = json_decode($this->withHeaders(['Authorization' => 'Bearer ' . $token])->get('enroll/config')->getJSON(), true);
+        $this->assertSame(['receive', 'node2.eu', 'node2.eu.example.net', 'node2.eu.example.net=46'],
+            [$cfg['role'], $cfg['node_id'], $cfg['hostname'], $cfg['mx_names']]);
+        $this->assertArrayHasKey('admin_ca', $cfg);
+        $this->withHeaders(['Authorization' => 'Bearer mre_wrongwrongwrongwrongwrong'])->get('enroll/config')->assertStatus(401);
+        // bootstrap script is public (no secrets) and points to this admin
+        $bs = $this->withHeaders([])->get('enroll/bootstrap.sh');
+        $bs->assertStatus(200);
+        $bs->assertSee('install/install.sh" --admin-url=');
+        $bs->assertDontSee('{{ADMIN_URL}}');
         $bad = $this->withHeaders(['Authorization' => 'Bearer ' . $token])->withBodyFormat('json')
             ->post('enroll', ['node_id' => 'other.eu', 'base_url' => 'https://node2.eu.example.net']);
         $bad->assertStatus(422);
@@ -190,6 +201,15 @@ final class PagesTest extends CIUnitTestCase
         // read-only users cannot create tokens
         $this->withSession(['access' => 'ro'] + $this->admin)->post('nodes/enroll', ['node_key' => 'n3.eu', 'hostname' => 'n3.example.net',
             'csrf_test_name' => 'testtoken0123456789abcdef'])->assertStatus(403);
+    }
+
+    public function testEnrollDnsCheck(): void
+    {
+        $r = $this->withSession($this->admin)->get('nodes/enroll/dns?hostname=nope.invalid&mx_names=' . urlencode('nope4.invalid=4'));
+        $r->assertSee('nope.invalid');
+        $r->assertSee('nope4.invalid');
+        $r->assertSee('A fehlt');
+        $this->withSession($this->admin)->get('nodes/enroll/dns')->assertSee('Hostname eingeben');
     }
 
     public function testProjectMove(): void

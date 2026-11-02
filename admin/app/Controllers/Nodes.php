@@ -171,22 +171,46 @@ class Nodes extends BaseController
         if ($errors !== []) {
             return view('nodes/enroll', ['data' => $d, 'errors' => $errors, 'token' => null]);
         }
-        $token = Enrollment::create($d['node_key'], $d['hostname']);
+        $token = Enrollment::create($d['node_key'], $d['hostname'], preg_replace('/\s+/', ' ', $d['mx_names']));
         Audit::log('node.enroll_token', $d['node_key'], ['hostname' => $d['hostname'], 'valid_minutes' => Enrollment::TTL_MINUTES]);
 
-        return view('nodes/enroll', ['data' => $d, 'errors' => [], 'token' => $token, 'version' => self::version(),
+        return view('nodes/enroll', ['data' => $d, 'errors' => [], 'token' => $token, 'version' => Enroll::version(),
             'adminUrl' => rtrim(base_url(), '/')]);
     }
 
-    private static function version(): string
+    /**
+     * htmx: DNS of the host name and MX names as the admin sees it (A, AAAA, PTR), before the node is installed.
+     * The installer checks again on the node against its own addresses.
+     */
+    public function enrollDns()
     {
-        foreach ([ROOTPATH . 'VERSION', ROOTPATH . '../VERSION'] as $f) {
-            if (is_file($f)) {
-                return trim((string) file_get_contents($f));
+        $host  = strtolower(trim((string) $this->request->getGet('hostname')));
+        $names = $host !== '' && preg_match(Enrollment::HOSTNAME, $host) ? [$host => '46'] : [];
+        foreach (preg_split('/\s+/', strtolower(trim((string) $this->request->getGet('mx_names')))) ?: [] as $entry) {
+            if (preg_match('/^([a-z0-9.-]+)=(4|6|46)$/', $entry, $m) && preg_match(Enrollment::HOSTNAME, $m[1])) {
+                $names[$m[1]] = $m[2];
             }
         }
+        $rows = [];
+        foreach ($names as $name => $fams) {
+            $v4 = array_column(@dns_get_record($name, DNS_A) ?: [], 'ip');
+            $v6 = array_column(@dns_get_record($name, DNS_AAAA) ?: [], 'ipv6');
+            $problems = [];
+            foreach (['4' => [$v4, 'A'], '6' => [$v6, 'AAAA']] as $fam => [$list, $label]) {
+                if (str_contains($fams, $fam) && $list === []) {
+                    $problems[] = $label . ' fehlt';
+                } elseif (! str_contains($fams, $fam) && $list !== []) {
+                    $problems[] = $label . ' vorhanden, erwartet nur IPv' . $fams;
+                }
+            }
+            $ptr = [];
+            foreach ([...$v4, ...$v6] as $ip) {
+                $ptr[$ip] = ($h = @gethostbyaddr($ip)) && $h !== $ip ? $h : '–';
+            }
+            $rows[] = ['name' => $name, 'fams' => $fams, 'v4' => $v4, 'v6' => $v6, 'ptr' => $ptr, 'problems' => $problems];
+        }
 
-        return '';
+        return view('nodes/_enroll_dns', ['rows' => $rows]);
     }
 
     private function validateNode(array $d): array

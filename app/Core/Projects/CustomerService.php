@@ -62,6 +62,9 @@ class CustomerService
 
         return Transaction::run($this->db, function () use ($key, $changes, $ctx): array {
             $customer = $this->getByKey($key);
+            if (($customer['managed_by'] ?? 'cli') === 'admin' && $ctx->source === 'cli' && ! $ctx->force) {
+                throw new ConfigException('MANAGED_BY_ADMIN', 'Customer "' . $key . '" is managed by the admin app; use --force to change it from the CLI');
+            }
             $row      = [];
             if (array_key_exists('name', $changes)) {
                 $row['name'] = trim((string) $changes['name']) !== '' ? trim((string) $changes['name']) : $key;

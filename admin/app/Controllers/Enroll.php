@@ -10,12 +10,49 @@ use App\Libraries\Sync;
 use Throwable;
 
 /**
- * Self-registration of a new node (install.sh --admin-url=... --enroll-token=...). No session: the one-time
- * enrollment token is the credential. GET /enroll/ca.pem returns the admin CA (public certificate) the node must
- * trust; POST /enroll registers the node and consumes the token.
+ * Self-registration of a new node. No session: the one-time enrollment token is the credential.
+ *   GET  /enroll/bootstrap.sh  public script: installs git, fetches the release and runs install.sh with the token
+ *   GET  /enroll/config        node id, host name, MX names, version and admin CA for install.sh
+ *   GET  /enroll/ca.pem        admin CA only
+ *   POST /enroll               registers the node and consumes the token
  */
 class Enroll extends BaseController
 {
+    public function bootstrap()
+    {
+        $script = (string) file_get_contents(APPPATH . 'Views/enroll/bootstrap.sh');
+        $script = strtr($script, ['{{ADMIN_URL}}' => rtrim(base_url(), '/'), '{{REPO}}' => self::REPO]);
+
+        return $this->response->setHeader('Content-Type', 'text/x-shellscript; charset=utf-8')->setHeader('Cache-Control', 'no-store')->setBody($script);
+    }
+
+    public function config()
+    {
+        $e = Enrollment::find($this->request->getHeaderLine('Authorization'));
+        if ($e === null) {
+            return $this->response->setStatusCode(401)->setJSON(['error' => 'invalid or expired enrollment token']);
+        }
+
+        return $this->response->setHeader('Cache-Control', 'no-store')->setJSON([
+            'role' => 'receive', 'node_id' => $e['node_key'], 'hostname' => $e['hostname'], 'mx_names' => $e['mx_names'],
+            'version' => self::version(), 'repo' => self::REPO,
+            'admin_ca' => (string) @file_get_contents(dirname(config('Admin')->mtlsCert) . '/ca.pem'),
+        ]);
+    }
+
+    public const REPO = 'https://github.com/Skittel/MailRunner.git';
+
+    public static function version(): string
+    {
+        foreach ([ROOTPATH . 'VERSION', ROOTPATH . '../VERSION'] as $f) {
+            if (is_file($f)) {
+                return trim((string) file_get_contents($f));
+            }
+        }
+
+        return '';
+    }
+
     public function ca()
     {
         if (Enrollment::find($this->request->getHeaderLine('Authorization')) === null) {

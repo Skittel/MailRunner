@@ -1,17 +1,22 @@
 #!/bin/bash
 # MailRunner node installer. Idempotent: run again to deploy a new version.
 #
-#   sudo install/install.sh --role=receive --node-id=node1.eu --hostname=mx.example.net \
-#        [--mx-names="mx.example.net=46 mx4.example.net=4 mx6.example.net=6"] [--le-email=ops@example.net] \
-#        [--admin-url=https://admin.example.net --enroll-token=TOKEN]
+# With MailRunner Admin (node id, host name and MX names come from the admin; normally started by
+# curl -fsSL https://<admin>/enroll/bootstrap.sh | sudo bash -s -- <token>):
+#   sudo install/install.sh --admin-url=https://admin.example.net --enroll-token=TOKEN
 #
-# Needs: Ubuntu 26.04, DNS (A/AAAA) of --hostname and the MX names pointing to this server, port 80 reachable.
-# Without a certificate the installer gets one from Let's Encrypt (webroot /var/www/acme) for the host name and
-# all MX names. --enroll-token (MailRunner Admin -> Nodes -> "Neue Node", valid 60 min, single use) fetches the
-# admin CA and registers the node in MailRunner Admin.
+# Without MailRunner Admin (standalone node, configured with the CLI):
+#   sudo install/install.sh --role=receive --node-id=node1.eu --hostname=mx.example.net \
+#        [--mx-names="mx.example.net=46 mx4.example.net=4 mx6.example.net=6"] [--le-email=ops@example.net]
+#
+# Needs: Ubuntu 26.04, DNS (A/AAAA) of the host name and the MX names pointing to this server, port 80 reachable.
+# Without a certificate the installer checks DNS (install/lib/dnscheck.py, --skip-dns-check e.g. behind NAT) and
+# gets one from Let's Encrypt (webroot /var/www/acme) for the host name and all MX names.
+# The enrollment token (MailRunner Admin -> Nodes -> "Neue Node einrichten", 60 min, single use) also fetches
+# the admin CA and registers the node in MailRunner Admin.
 set -euo pipefail
 
-ROLE=""; NODE_ID=""; HOST=""; DB_NAME="mailrunner"; MX_NAMES=""; ADMIN_CA=""; LE_EMAIL=""; ADMIN_URL=""; ENROLL_TOKEN=""
+ROLE=""; NODE_ID=""; HOST=""; DB_NAME="mailrunner"; MX_NAMES=""; ADMIN_CA=""; LE_EMAIL=""; ADMIN_URL=""; ENROLL_TOKEN=""; SKIP_DNS=0
 SOURCE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 for arg in "$@"; do
     case "$arg" in
@@ -25,6 +30,7 @@ for arg in "$@"; do
         --le-email=*) LE_EMAIL="${arg#*=}" ;;   # contact for Let's Encrypt (optional)
         --admin-url=*) ADMIN_URL="${arg#*=}" ;; # MailRunner Admin, e.g. https://admin.example.net (enrollment)
         --enroll-token=*) ENROLL_TOKEN="${arg#*=}" ;; # one-time enrollment token from MailRunner Admin
+        --skip-dns-check) SKIP_DNS=1 ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
@@ -34,13 +40,27 @@ log() { echo "==> $*"; }
 render() { sed -e "s/{{HOSTNAME}}/${HOST}/g" -e "s/{{CERT_NAMES}}/${CERT_NAMES:-$HOST}/g" "$1"; }
 
 [[ $EUID -eq 0 ]] || die "run as root"
-[[ "$ROLE" == "receive" ]] || die "--role=receive is required (send is not implemented yet)"
-[[ "$NODE_ID" =~ ^[a-z0-9][a-z0-9.-]{1,62}$ ]] || die "--node-id is required, e.g. node1.eu"
-[[ "$HOST" =~ ^[a-z0-9.-]+\.[a-z]{2,}$ ]] || die "--hostname is required (FQDN)"
 if [[ -n "$ENROLL_TOKEN" ]]; then
     [[ "$ADMIN_URL" =~ ^https://[a-z0-9.-]+(:[0-9]+)?$ ]] || die "--enroll-token needs --admin-url=https://<admin host>"
     [[ "$ENROLL_TOKEN" =~ ^[A-Za-z0-9_-]{20,80}$ ]] || die "--enroll-token: invalid format"
+    log "Enrollment: node configuration from MailRunner Admin"
+    ENROLL_JSON="$(curl -fsS --max-time 20 -H "Authorization: Bearer $ENROLL_TOKEN" "$ADMIN_URL/enroll/config")" \
+        || die "enrollment: token invalid, expired or used - create a new one in MailRunner Admin"
+    cfg() { python3 -c 'import json,sys; v=json.loads(sys.argv[1]).get(sys.argv[2]) or ""; print(v)' "$ENROLL_JSON" "$1"; }
+    [[ -z "$ROLE" ]] && ROLE="$(cfg role)"
+    [[ -z "$NODE_ID" ]] && NODE_ID="$(cfg node_id)"
+    [[ -z "$HOST" ]] && HOST="$(cfg hostname)"
+    [[ -z "$MX_NAMES" ]] && MX_NAMES="$(cfg mx_names)"
+    [[ -z "$LE_EMAIL" ]] && LE_EMAIL="$(cfg le_email)"
+    ENROLL_CA="$(mktemp)"
+    trap 'rm -f "$ENROLL_CA"' EXIT
+    cfg admin_ca > "$ENROLL_CA"
+    ADMIN_CA="$ENROLL_CA"
+    echo "node $NODE_ID, host $HOST${MX_NAMES:+, MX names: $MX_NAMES}"
 fi
+[[ "$ROLE" == "receive" ]] || die "--role=receive is required (send is not implemented yet)"
+[[ "$NODE_ID" =~ ^[a-z0-9][a-z0-9.-]{1,62}$ ]] || die "--node-id is required, e.g. node1.eu"
+[[ "$HOST" =~ ^[a-z0-9.-]+\.[a-z]{2,}$ ]] || die "--hostname is required (FQDN)"
 [[ -f "$SOURCE/VERSION" ]] || die "source not found: $SOURCE"
 T="$SOURCE/install/templates"
 VERSION="$(cat "$SOURCE/VERSION")"
@@ -62,6 +82,11 @@ for entry in $KNOWN_MX; do
 done
 install -d -m 0755 /var/www/acme
 if [[ ! -f "/etc/letsencrypt/live/$HOST/fullchain.pem" ]]; then
+    if [[ $SKIP_DNS -eq 0 ]]; then
+        DNS_ARGS=("$HOST=46"); for entry in $KNOWN_MX; do [[ "${entry%%=*}" == "$HOST" ]] && DNS_ARGS[0]="$entry" || DNS_ARGS+=("$entry"); done
+        python3 -I "$SOURCE/install/lib/dnscheck.py" "${DNS_ARGS[@]}" \
+            || die "DNS does not point to this server yet (fix the records, or --skip-dns-check e.g. behind NAT)"
+    fi
     # port 80 only, for the ACME challenge; the full API vhost follows once the certificate exists
     if [[ ! -e /etc/nginx/sites-enabled/mailrunner-api ]]; then
         sed -e "s/{{HOSTNAME}}/${CERT_NAMES}/g" "$T/web/nginx-acme.conf" > /etc/nginx/sites-available/mailrunner-acme
@@ -77,14 +102,6 @@ if [[ ! -f "/etc/letsencrypt/live/$HOST/fullchain.pem" ]]; then
 fi
 install -d /etc/letsencrypt/renewal-hooks/deploy
 install -m 0755 "$T/web/letsencrypt-reload.sh" /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh
-
-if [[ -n "$ENROLL_TOKEN" ]]; then
-    log "Enrollment: admin CA from MailRunner Admin"
-    ENROLL_CA="$(mktemp)"
-    curl -fsS --max-time 20 -H "Authorization: Bearer $ENROLL_TOKEN" "$ADMIN_URL/enroll/ca.pem" -o "$ENROLL_CA" \
-        || die "enrollment: admin CA not available (token expired or used? create a new one in MailRunner Admin)"
-    ADMIN_CA="$ENROLL_CA"
-fi
 
 log "Self test level 1 (mail path and analysis without network)"
 # A failing test stops the installation before anything is changed.

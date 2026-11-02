@@ -13,12 +13,12 @@ final class Enrollment
     public const HOSTNAME    = '/^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/';
 
     /** Creates a token for the node; returns the token (shown once). */
-    public static function create(string $nodeKey, string $hostname): string
+    public static function create(string $nodeKey, string $hostname, string $mxNames = ''): string
     {
         $token = 'mre_' . rtrim(strtr(base64_encode(random_bytes(24)), '+/', '-_'), '=');
         $now   = Clock::now();
         db_connect()->table('node_enrollments')->insert([
-            'token_hash' => hash('sha256', $token), 'node_key' => $nodeKey, 'hostname' => $hostname, 'created_by' => session('user_id'),
+            'token_hash' => hash('sha256', $token), 'node_key' => $nodeKey, 'hostname' => $hostname, 'mx_names' => $mxNames, 'created_by' => session('user_id'),
             'created_at' => $now, 'expires_at' => gmdate('Y-m-d H:i:s', time() + self::TTL_MINUTES * 60), 'used_at' => null,
         ]);
 

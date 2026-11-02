@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.8 - 2026-11-02
+- New node with one command: `curl -fsSL https://<admin>/enroll/bootstrap.sh | sudo bash -s -- <token>`.
+  Node id, host name and MX names are entered in MailRunner Admin; the node gets them with the token
+  (`GET /enroll/config`, also the admin CA and the release version). `install.sh --admin-url --enroll-token`
+  without further options.
+- DNS check: `install/lib/dnscheck.py` asks the authoritative name servers (not /etc/hosts or the local
+  resolver) whether host name and MX names point to this server with the expected IP versions, shows PTR;
+  runs before the certificate is requested (`--skip-dns-check` e.g. behind NAT). Admin: "DNS prüfen" on the
+  enrollment page.
+- Node without MailRunner Admin: new CLI commands `mr:customer:set`, `mr:rolemail:list`, `mr:rolemail:show
+  [--raw]` (shared service with the node admin API). Customers of the admin app need `--force` on the CLI,
+  like projects. Test `CliParityTest` runs the real commands.
+
 ## 0.1.7 - 2026-11-02
 - `install.sh` on a fresh server: gets the Let's Encrypt certificate itself (webroot, host name plus all MX
   names, optional `--le-email`), installs the renewal hook (reload nginx/Postfix), port-80 vhost serves all

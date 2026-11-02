@@ -93,6 +93,9 @@ abstract class MrCommand extends BaseCommand
             foreach ($params as $key => $value) {
                 if (is_int($key)) {
                     $this->parsedPositional[] = (string) $value;
+                } elseif (str_contains($key, '=')) { // command('x --opt=value') passes "opt=value" as the key
+                    [$name, $v]                 = explode('=', $key, 2); // --opt="a b" arrives as "opt=" + value
+                    $this->parsedOptions[$name] = $v !== '' ? trim($v, '"\'') : (string) ($value ?? '');
                 } else {
                     $this->parsedOptions[$key] = $value ?? true;
                 }

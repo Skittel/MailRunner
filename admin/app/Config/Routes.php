@@ -15,6 +15,8 @@ $routes->get('auth/logout', 'Auth::logout');
 
 // node self-registration (install.sh --enroll-token): no session, one-time token
 $routes->get('enroll/ca.pem', 'Enroll::ca');
+$routes->get('enroll/config', 'Enroll::config');
+$routes->get('enroll/bootstrap.sh', 'Enroll::bootstrap');
 $routes->post('enroll', 'Enroll::register');
 
 $routes->group('', ['filter' => 'adminauth'], static function (RouteCollection $routes): void {
@@ -25,6 +27,7 @@ $routes->group('', ['filter' => 'adminauth'], static function (RouteCollection $
     $routes->post('nodes', 'Nodes::create');
     $routes->get('nodes/enroll', 'Nodes::enrollForm');
     $routes->post('nodes/enroll', 'Nodes::enroll');
+    $routes->get('nodes/enroll/dns', 'Nodes::enrollDns');
     $routes->get('nodes/(:pid)', 'Nodes::show/$1');
     $routes->post('nodes/(:pid)/poll', 'Nodes::poll/$1');
     $routes->get('nodes/(:pid)/journal', 'Nodes::journal/$1');
