@@ -203,6 +203,19 @@ final class PagesTest extends CIUnitTestCase
             'csrf_test_name' => 'testtoken0123456789abcdef'])->assertStatus(403);
     }
 
+    public function testMxNamesAcceptCommaAndSpaces(): void
+    {
+        $n = static fn ($v) => \App\Libraries\Enrollment::normalizeMxNames($v);
+        $this->assertSame('a.example.net=46, b.example.net=4, c.example.net=6', $n('a.example.net=46, b.example.net=4,c.example.net=6'));
+        $this->assertSame('a.example.net=46, b.example.net=4', $n('  A.example.net=46   b.example.net=4 '));
+        $this->assertSame('', $n(''));
+        $this->assertNull($n('a.example.net=5'));
+        $this->assertNull($n('a.example.net'));
+        $r = $this->postAs('nodes/enroll', ['node_key' => 'node3.eu', 'hostname' => 'node3.example.net', 'mx_names' => 'node3.example.net=46,node3-ip4.example.net=4']);
+        $this->seeInDatabase('node_enrollments', ['node_key' => 'node3.eu', 'mx_names' => 'node3.example.net=46, node3-ip4.example.net=4']);
+        $this->withSession($this->admin)->get('nodes/enroll/dns?hostname=node3.invalid&mx_names=' . urlencode('a4.invalid=4,a6.invalid=6'))->assertSee('a6.invalid');
+    }
+
     public function testEnrollDnsCheck(): void
     {
         $r = $this->withSession($this->admin)->get('nodes/enroll/dns?hostname=nope.invalid&mx_names=' . urlencode('nope4.invalid=4'));

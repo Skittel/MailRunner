@@ -10,8 +10,8 @@ $fb  = static fn ($k) => isset($errors[$k]) ? '<div class="invalid-feedback">' .
         <div class="col-md-3 mb-3"><label class="form-label required">Node-ID</label><input name="node_key" class="form-control<?= $err('node_key') ?>" value="<?= esc($data['node_key']) ?>" placeholder="node2.eu"><?= $fb('node_key') ?></div>
         <div class="col-md-4 mb-3"><label class="form-label required">Hostname</label><input name="hostname" class="form-control<?= $err('hostname') ?>" value="<?= esc($data['hostname']) ?>" placeholder="node2.eu.example.net"><?= $fb('hostname') ?>
             <div class="form-hint">Name der Node (API, Zertifikat, SMTP-Begrüßung).</div></div>
-        <div class="col-md-5 mb-3"><label class="form-label">MX-Namen (optional)</label><input name="mx_names" class="form-control mono<?= $err('mx_names') ?>" value="<?= esc($data['mx_names']) ?>" placeholder="node2.eu.example.net=46 node2-ip4.example.net=4 node2-ip6.example.net=6"><?= $fb('mx_names') ?>
-            <div class="form-hint">Name=IP-Versionen. Der Selbsttest prüft sie, das Zertifikat enthält sie.</div></div>
+        <div class="col-md-5 mb-3"><label class="form-label">MX-Namen (optional)</label><input name="mx_names" class="form-control mono<?= $err('mx_names') ?>" value="<?= esc($data['mx_names']) ?>" placeholder="node2.eu.example.net=46, node2-ip4.example.net=4, node2-ip6.example.net=6"><?= $fb('mx_names') ?>
+            <div class="form-hint">Name=IP-Versionen, getrennt durch Komma oder Leerzeichen. Der Selbsttest prüft sie, das Zertifikat enthält sie.</div></div>
     </div>
     <div id="enroll-dns" class="mt-2"></div></div>
     <div class="card-footer d-flex justify-content-between">

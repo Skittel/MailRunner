@@ -12,6 +12,22 @@ final class Enrollment
     public const NODE_KEY    = '/^[a-z0-9][a-z0-9.-]{1,62}$/';
     public const HOSTNAME    = '/^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/';
 
+    /**
+     * MX names "name=46, name4=4 name6=6": comma and/or spaces as separator. Returns the entries normalized
+     * ("a=46, b=4") or null if one is invalid.
+     */
+    public static function normalizeMxNames(string $value): ?string
+    {
+        $entries = preg_split('/[\s,]+/', strtolower(trim($value)), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        foreach ($entries as $e) {
+            if (! preg_match('/^([a-z0-9.-]+)=(4|6|46)$/', $e, $m) || ! preg_match(self::HOSTNAME, $m[1])) {
+                return null;
+            }
+        }
+
+        return implode(', ', $entries);
+    }
+
     /** Creates a token for the node; returns the token (shown once). */
     public static function create(string $nodeKey, string $hostname, string $mxNames = ''): string
     {

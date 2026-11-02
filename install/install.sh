@@ -77,6 +77,7 @@ log "Certificate (Let's Encrypt, webroot /var/www/acme)"
 CERT_NAMES="$HOST"
 KNOWN_MX="$MX_NAMES"
 [[ -z "$KNOWN_MX" && -f /etc/mailrunner/app.env ]] && KNOWN_MX="$(sed -n 's/^MAILRUNNER_MX_NAMES = "\(.*\)"$/\1/p' /etc/mailrunner/app.env)"
+KNOWN_MX="${KNOWN_MX//,/ }"   # comma and/or spaces as separator
 for entry in $KNOWN_MX; do
     name="${entry%%=*}"; [[ " $CERT_NAMES " == *" $name "* ]] || CERT_NAMES="$CERT_NAMES $name"
 done
@@ -162,6 +163,7 @@ ENV
 fi
 sed -i '/^MAILRUNNER_SOURCE_DIR = /d' /etc/mailrunner/app.env
 echo "MAILRUNNER_SOURCE_DIR = \"$SOURCE\"" >> /etc/mailrunner/app.env
+MX_NAMES="$(echo "$MX_NAMES" | tr ',' ' ' | xargs)"   # stored space-separated
 if [[ -n "$MX_NAMES" ]]; then
     [[ "$MX_NAMES" =~ ^[a-z0-9.=46\ ,-]+$ ]] || die "--mx-names: invalid characters"
     sed -i '/^MAILRUNNER_MX_NAMES = /d' /etc/mailrunner/app.env

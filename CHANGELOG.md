@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.10 - 2026-11-02
+- MX names may be separated by commas and/or spaces everywhere (admin enrollment form and DNS check,
+  `install.sh --mx-names`, `install/lib/dnscheck.py`; the self test already did). The admin stores them
+  as "a=46, b=4"; `app.env` keeps them space-separated.
+
 ## 0.1.9 - 2026-11-02
 - Node switches in `/etc/mailrunner/app.env` (default `auto`, kept on updates):
   - `MAILRUNNER_ADMIN_UPDATES=auto|manual`: MailRunner Admin may request a software update

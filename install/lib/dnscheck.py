@@ -92,7 +92,7 @@ def check(entries, own):
 
 
 def main(argv):
-    entries = [a for a in argv if not a.startswith("-")]
+    entries = [e for a in argv if not a.startswith("-") for e in a.replace(",", " ").split()]
     if not entries:
         print(__doc__)
         return 2

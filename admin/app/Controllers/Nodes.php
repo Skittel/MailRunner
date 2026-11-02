@@ -165,13 +165,16 @@ class Nodes extends BaseController
         if (! preg_match(Enrollment::HOSTNAME, $d['hostname'])) {
             $errors['hostname'] = 'Vollständiger Hostname, z. B. node2.eu.example.net';
         }
-        if ($d['mx_names'] !== '' && ! preg_match('/^([a-z0-9.-]+=(4|6|46)\s*)+$/', $d['mx_names'])) {
-            $errors['mx_names'] = 'Format: name=46 name4=4 name6=6';
+        $mx = Enrollment::normalizeMxNames($d['mx_names']);
+        if ($mx === null) {
+            $errors['mx_names'] = 'Format: name=46, name4=4, name6=6 (Komma oder Leerzeichen)';
+        } else {
+            $d['mx_names'] = $mx;
         }
         if ($errors !== []) {
             return view('nodes/enroll', ['data' => $d, 'errors' => $errors, 'token' => null]);
         }
-        $token = Enrollment::create($d['node_key'], $d['hostname'], preg_replace('/\s+/', ' ', $d['mx_names']));
+        $token = Enrollment::create($d['node_key'], $d['hostname'], $d['mx_names']);
         Audit::log('node.enroll_token', $d['node_key'], ['hostname' => $d['hostname'], 'valid_minutes' => Enrollment::TTL_MINUTES]);
 
         return view('nodes/enroll', ['data' => $d, 'errors' => [], 'token' => $token, 'version' => Enroll::version(),
@@ -186,7 +189,7 @@ class Nodes extends BaseController
     {
         $host  = strtolower(trim((string) $this->request->getGet('hostname')));
         $names = $host !== '' && preg_match(Enrollment::HOSTNAME, $host) ? [$host => '46'] : [];
-        foreach (preg_split('/\s+/', strtolower(trim((string) $this->request->getGet('mx_names')))) ?: [] as $entry) {
+        foreach (preg_split('/[\s,]+/', strtolower(trim((string) $this->request->getGet('mx_names'))), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $entry) {
             if (preg_match('/^([a-z0-9.-]+)=(4|6|46)$/', $entry, $m) && preg_match(Enrollment::HOSTNAME, $m[1])) {
                 $names[$m[1]] = $m[2];
             }
