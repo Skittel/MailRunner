@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.6 - 2026-11-02
+- `mr:secrets:scan --accept`: accepts the current findings (e.g. on a development node), journal event
+  `node.secrets_accepted`. Accepted findings no longer fail `base.secret_leak` (detail shows the number).
+  An acceptance is bound to setting, location, value fingerprint and count: new places, a rotated value or
+  more occurrences fail again.
+
 ## 0.1.5 - 2026-11-02
 - Admin, postmaster & abuse: self test mails (customer `system`) are hidden by default; switch
   "Selbsttests anzeigen" at the top. Empty lists show a centred "Keine Datensätze".

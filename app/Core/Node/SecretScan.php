@@ -13,6 +13,10 @@ use RecursiveIteratorIterator;
  *
  * Results name only the setting and the location, never the value. Used by mr:secrets:scan and the self test
  * (check base.secret_leak).
+ *
+ * Known findings can be accepted (mr:secrets:scan --accept, e.g. on a development node). An accepted finding is
+ * bound to setting, location, a fingerprint of the value and its count: a new place, a new value (rotated key)
+ * or more occurrences fail again.
  */
 class SecretScan
 {
@@ -33,6 +37,7 @@ class SecretScan
         private readonly ?string $nodeKeyFile,
         private readonly array $dirs,
         private readonly array $skipDirs = [],
+        private readonly ?string $acceptFile = null,
     ) {
     }
 
@@ -42,7 +47,7 @@ class SecretScan
 
         return new self($db, glob($c->configDir . '/*.env') ?: [], $c->nodeKeyFile(),
             array_values(array_unique([$c->dataDir, rtrim(WRITEPATH, '/')])),
-            [$c->receiveSpoolDir(), $c->receiveStoreDir(), rtrim(WRITEPATH, '/') . '/session']);
+            [$c->receiveSpoolDir(), $c->receiveStoreDir(), rtrim(WRITEPATH, '/') . '/session'], $c->dataDir . '/secret-scan-accepted.json');
     }
 
     /**
@@ -111,7 +116,7 @@ class SecretScan
             $row  = $this->db->query(sprintf('SELECT %s FROM `%s`', $sums, str_replace('`', '', $col['t'])), $values)->getRowArray();
             foreach ($values as $i => $v) {
                 if ((int) ($row['h' . $i] ?? 0) > 0) {
-                    $findings[] = ['secret' => $secrets[$v], 'where' => 'db ' . $col['t'] . '.' . $col['c'], 'count' => (int) $row['h' . $i]];
+                    $findings[] = ['secret' => $secrets[$v], 'where' => 'db ' . $col['t'] . '.' . $col['c'], 'count' => (int) $row['h' . $i], 'fp' => self::fp($v)];
                 }
             }
             $sources++;
@@ -149,7 +154,7 @@ class SecretScan
                 foreach ($values as $v) {
                     $n = substr_count($data, $v);
                     if ($n > 0) {
-                        $findings[] = ['secret' => $secrets[$v], 'where' => $file->getPathname(), 'count' => $n];
+                        $findings[] = ['secret' => $secrets[$v], 'where' => $file->getPathname(), 'count' => $n, 'fp' => self::fp($v)];
                     }
                 }
                 $sources++;
@@ -163,6 +168,12 @@ class SecretScan
             $unique[$k] = isset($unique[$k]) ? ['count' => max($unique[$k]['count'], $f['count'])] + $f : $f;
         }
         $findings = array_values($unique);
+        $accepted = $this->accepted();
+        foreach ($findings as &$f) {
+            $a             = $accepted[$f['secret'] . "\0" . $f['where'] . "\0" . $f['fp']] ?? null;
+            $f['accepted'] = $a !== null && $f['count'] <= $a;
+        }
+        unset($f);
 
         return ['checked' => count(array_unique($secrets)), 'findings' => $findings, 'skipped' => $skipped, 'sources' => $sources];
     }
@@ -177,15 +188,54 @@ class SecretScan
         $t0 = microtime(true);
         try {
             $r      = $this->run();
-            $status = $r['findings'] === [] ? 'ok' : 'fail';
-            $detail = $r['findings'] === []
-                ? sprintf('%d secrets, %d sources clean', $r['checked'], $r['sources'])
-                : 'found: ' . implode('; ', array_map(static fn ($f) => $f['secret'] . ' in ' . $f['where'], $r['findings']));
+            $open     = array_values(array_filter($r['findings'], static fn ($f) => ! $f['accepted']));
+            $accepted = count($r['findings']) - count($open);
+            $status   = $open === [] ? 'ok' : 'fail';
+            $detail   = $open === []
+                ? sprintf('%d secrets, %d sources clean', $r['checked'], $r['sources']) . ($accepted > 0 ? sprintf(' (%d accepted finding%s)', $accepted, $accepted === 1 ? '' : 's') : '')
+                : 'found: ' . implode('; ', array_map(static fn ($f) => $f['secret'] . ' in ' . $f['where'], $open));
         } catch (\Throwable $e) {
             [$status, $detail] = ['fail', 'scan failed: ' . $e::class];
         }
 
         return ['name' => 'base.secret_leak', 'group' => 'base', 'status' => $status, 'detail' => substr($detail, 0, 300),
             'ms' => (int) round((microtime(true) - $t0) * 1000)];
+    }
+
+    /**
+     * Accepts the given findings (replaces earlier acceptances). Returns the number accepted.
+     *
+     * @param list<array{secret: string, where: string, count: int, fp: string}> $findings
+     */
+    public function accept(array $findings): int
+    {
+        if ($this->acceptFile === null) {
+            throw new \RuntimeException('no accept file configured');
+        }
+        $rows = array_map(static fn ($f) => ['secret' => $f['secret'], 'where' => $f['where'], 'fp' => $f['fp'], 'count' => $f['count'],
+            'accepted_at' => gmdate('Y-m-d\TH:i:s\Z')], $findings);
+        if (file_put_contents($this->acceptFile, json_encode($rows, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n") === false) {
+            throw new \RuntimeException('cannot write ' . $this->acceptFile);
+        }
+
+        return count($rows);
+    }
+
+    /** @return array<string, int> "secret\0where\0fp" => accepted count */
+    private function accepted(): array
+    {
+        $rows = $this->acceptFile !== null && is_readable($this->acceptFile) ? json_decode((string) file_get_contents($this->acceptFile), true) : [];
+        $map  = [];
+        foreach (is_array($rows) ? $rows : [] as $a) {
+            $map[($a['secret'] ?? '') . "\0" . ($a['where'] ?? '') . "\0" . ($a['fp'] ?? '')] = (int) ($a['count'] ?? 0);
+        }
+
+        return $map;
+    }
+
+    /** Short fingerprint of a value (not reversible), so a rotated key is a new finding. */
+    private static function fp(string $value): string
+    {
+        return substr(hash('sha256', 'mr-secret-scan:' . $value), 0, 16);
     }
 }

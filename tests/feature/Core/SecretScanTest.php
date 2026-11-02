@@ -44,7 +44,7 @@ final class SecretScanTest extends CIUnitTestCase
     private function scan(): SecretScan
     {
         return new SecretScan($this->db, [$this->dir . '/secrets.env', $this->dir . '/app.env'], $this->dir . '/node.key',
-            [$this->dir], [$this->dir . '/spool']);
+            [$this->dir], [$this->dir . '/spool'], $this->dir . '/accepted.json');
     }
 
     public function testSecretsIgnoreConfiguration(): void
@@ -78,5 +78,30 @@ final class SecretScanTest extends CIUnitTestCase
 
         $result = SelfTest::withCheck(['status' => 'pass', 'ok' => 3, 'failed' => [], 'checks' => []], $check);
         $this->assertSame(['fail', ['base.secret_leak']], [$result['status'], $result['failed']]);
+    }
+
+    public function testAcceptedFindingPassesUntilSomethingChanges(): void
+    {
+        $insert = fn () => $this->db->table('journal')->insert(['id' => (int) $this->db->query('SELECT COALESCE(MAX(id), 0) + 1 AS n FROM journal')->getRow('n'),
+            'created_at' => '2026-11-02 08:00:00', 'event' => 'node.selftest', 'source' => 'system', 'actor' => 'test',
+            'details' => json_encode(['detail' => 'x.abcdefghij0123456789xyzuvw.y'])]);
+        $insert();
+        $this->assertSame('fail', $this->scan()->check()['status']);
+
+        $this->assertSame(1, $this->scan()->accept($this->scan()->run()['findings']));
+        $this->assertStringNotContainsString('abcdefghij0123456789xyzuvw', (string) file_get_contents($this->dir . '/accepted.json'));
+        $check = $this->scan()->check();
+        $this->assertSame('ok', $check['status']);
+        $this->assertStringContainsString('1 accepted finding', $check['detail']);
+
+        $insert(); // a second occurrence is new
+        $this->assertSame('fail', $this->scan()->check()['status']);
+
+        $this->scan()->accept($this->scan()->run()['findings']);
+        $this->assertSame('ok', $this->scan()->check()['status']);
+        // rotated key: the same place with a new value fails again
+        file_put_contents($this->dir . '/secrets.env', "SPAMHAUS_DQS_KEY = \"abcdefghij0123456789xyzuvw\"\nOTHER_TOKEN = zyxwvutsrqponmlk\n");
+        file_put_contents($this->dir . '/logs/x.log', 'zyxwvutsrqponmlk');
+        $this->assertSame('fail', $this->scan()->check()['status']);
     }
 }
