@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.23 - 2026-11-03
+- Self test: the Spamhaus DQS check retries SERVFAIL/timeouts up to three times (3, 6, 10 s) instead of once;
+  a new node failed twice right after the install, the next run passed.
+
 ## 0.1.22 - 2026-11-03
 - Admin settings: every common secret shows its first and last two characters and the length for comparison
   (shorter than 8 characters: length only). Per node: "zentral", "lokal, gleicher Wert wie zentral",

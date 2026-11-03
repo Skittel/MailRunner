@@ -177,16 +177,18 @@ def base_checks(run):
             return "skip", "no SPAMHAUS_DQS_KEY"
         r = resolver()
         import dns.resolver
-        for attempt in (1, 2):  # right after an install unbound may still answer SERVFAIL (cold cache)
+        # right after an install unbound may answer SERVFAIL for a while (cold cache, upstream probing): ~20 s of retries
+        waits = (3, 6, 10)
+        for attempt in range(len(waits) + 1):
             try:
                 listed = [a.to_text() for a in r.resolve(f"2.0.0.127.{key}.zen.dq.spamhaus.net", "A")]
                 break
             except dns.resolver.NXDOMAIN:
                 return "fail", "test entry 127.0.0.2 not listed (key invalid or expired?)"
             except (dns.resolver.NoNameservers, dns.exception.Timeout):
-                if attempt == 2:
+                if attempt == len(waits):
                     raise
-                time.sleep(3)
+                time.sleep(waits[attempt])
         try:
             r.resolve(f"1.0.0.127.{key}.zen.dq.spamhaus.net", "A")
             return "fail", "127.0.0.1 listed (unexpected answer)"
