@@ -242,9 +242,12 @@ systemctl restart mailrunner-milter
 
 log "Start Postfix"
 
+# Postfix copies /etc/resolv.conf into its chroot keeping the owner (systemd-resolve) -> "not owned by root" warning
+[[ -f /var/spool/postfix/etc/resolv.conf ]] && chown root:root /var/spool/postfix/etc/resolv.conf
 postfix check
 systemctl enable --now postfix >/dev/null 2>&1
 postfix reload >/dev/null 2>&1 || systemctl restart postfix
+[[ -f /var/spool/postfix/etc/resolv.conf ]] && chown root:root /var/spool/postfix/etc/resolv.conf   # fresh install: copied at start
 
 log "systemd units"
 # units of the old pipe path (<= 0.0.6)

@@ -98,6 +98,7 @@ class SelfTest
             'ok'          => $result['ok'] ?? 0,
             'failed'      => self::named($checks, 'fail'),
             'warnings'    => self::named($checks, 'warn'),
+            'skipped'     => self::named($checks, 'skip'),
         ];
         if (isset($result['error'])) {
             $details['error'] = $result['error'];

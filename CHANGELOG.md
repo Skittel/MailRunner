@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.16 - 2026-11-03
+- Self test summary shows skipped checks (count and names, e.g. checks without a key in `secrets.env`);
+  journal `node.selftest` has `skipped`.
+- install.sh: `/var/spool/postfix/etc/resolv.conf` owned by root (Postfix copied it with the owner
+  systemd-resolve and warned "not owned by root").
+
 ## 0.1.15 - 2026-11-03
 - Admin: commands on the enrollment page and new project tokens have a copy button; command text is
   selectable with one click (`assets/admin.js`, no inline script; CSS/JS with cache-busting parameter).

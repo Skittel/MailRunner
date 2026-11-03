@@ -35,8 +35,10 @@ class SelfTestCommand extends MrCommand
             foreach ($result['checks'] ?? [] as $c) {
                 \CodeIgniter\CLI\CLI::write(sprintf('%-5s %-36s %s', strtoupper($c['status']), $c['name'], $c['detail']));
             }
-            $summary = sprintf('Self test %s: %d ok, %d failed, %d warnings, %.1f s', strtoupper($result['status']), $result['ok'] ?? 0,
-                count($result['failed'] ?? []), count($result['warnings'] ?? []), ($result['duration_ms'] ?? 0) / 1000);
+            $skipped = array_column(array_filter($result['checks'] ?? [], static fn ($c) => $c['status'] === 'skip'), 'name');
+            $summary = sprintf('Self test %s: %d ok, %d failed, %d warnings, %d skipped, %.1f s', strtoupper($result['status']), $result['ok'] ?? 0,
+                count($result['failed'] ?? []), count($result['warnings'] ?? []), count($skipped), ($result['duration_ms'] ?? 0) / 1000)
+                . ($skipped !== [] ? ' (skipped: ' . implode(', ', $skipped) . ')' : '');
             $result['status'] === 'pass' ? $this->ok($summary) : \CodeIgniter\CLI\CLI::error($summary . (isset($result['error']) ? ' - ' . $result['error'] : ''));
         }
 
