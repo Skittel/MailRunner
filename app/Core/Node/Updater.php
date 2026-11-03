@@ -72,7 +72,11 @@ class Updater
             return $result;
         }
         $this->git(['fetch', '-q', '--tags', 'origin'], false);
-        $target ??= $this->requested()['version'] ?? $this->newestTag();
+        $requested = $this->requested()['version'] ?? null;
+        if ($requested !== null && version_compare($requested, $this->currentVersion, '<=')) {
+            $requested = null; // already installed (or older): an old admin request does not block newer tags
+        }
+        $target ??= $requested ?? $this->newestTag();
         $result['target'] = $target;
         $tagOk            = $target !== null && NodeInfo::isValidVersion($target) && $this->git(['rev-parse', '-q', '--verify', 'refs/tags/v' . $target], false) !== null;
         if ($target === null || ! NodeInfo::isValidVersion($target)) {

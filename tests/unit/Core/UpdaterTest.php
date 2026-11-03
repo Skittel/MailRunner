@@ -69,6 +69,13 @@ final class UpdaterTest extends CIUnitTestCase
         $this->assertSame('0.1.1', $u->plan(null)['target']);
     }
 
+    public function testStaleRequestDoesNotBlockNewerTags(): void
+    {
+        $u = $this->updater('0.1.0');
+        $u->request('0.1.0', 'CN=admin'); // already installed
+        $this->assertSame('0.1.1', $u->plan(null)['target']);
+    }
+
     public function testGuards(): void
     {
         $plan = $this->updater('0.1.1')->plan('0.1.0');

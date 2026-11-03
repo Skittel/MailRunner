@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.14 - 2026-11-03
+- `mr:update` without `--version`: an admin update request for a version that is already installed (or
+  older) is ignored, so the newest tag is the target (before: "already at …" until the request was replaced).
+
 ## 0.1.13 - 2026-11-03
 - Command hints shown to people are complete and copyable: `sudo mailrunner mr:...` (admin node card,
   node API messages for manual configuration, node key / Postfix reload / role mail hints).
