@@ -1,7 +1,7 @@
 <?php if ($created): ?>
     <div class="card-body border-bottom bg-green-lt">
         <div class="fw-bold mb-1">Token angelegt – jetzt kopieren, er wird nicht noch einmal angezeigt:</div>
-        <input class="form-control mono" readonly value="<?= esc($created['bearer'], 'attr') ?>">
+        <div class="copy-box"><input class="form-control mono copy-src" readonly value="<?= esc($created['bearer'], 'attr') ?>"><?= view('components/copy_btn') ?></div>
     </div>
 <?php endif ?>
 <div class="list-group list-group-flush">

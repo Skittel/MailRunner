@@ -6,7 +6,7 @@
     <meta name="csrf-token" content="<?= csrf_hash() ?>">
     <title><?= esc($title ?? 'MailRunner Admin') ?> · MailRunner Admin</title>
     <link rel="stylesheet" href="/assets/vendor/tabler/tabler.min.css">
-    <link rel="stylesheet" href="/assets/admin.css">
+    <link rel="stylesheet" href="/assets/admin.css?v=<?= filemtime(FCPATH . 'assets/admin.css') ?>">
     <link rel="icon" href="/favicon.ico" sizes="any"><link rel="apple-touch-icon" href="/assets/img/mailrunner-icon.png">
     <meta name="theme-color" content="#16283A">
 </head>
@@ -63,5 +63,6 @@
 </div>
 <script src="/assets/vendor/tabler/tabler.min.js" defer></script>
 <script src="/assets/vendor/htmx/htmx.min.js" defer></script>
+<script src="/assets/admin.js?v=<?= filemtime(FCPATH . 'assets/admin.js') ?>" defer></script>
 </body>
 </html>

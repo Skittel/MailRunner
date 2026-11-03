@@ -167,6 +167,7 @@ final class PagesTest extends CIUnitTestCase
 
         $r = $this->postAs('nodes/enroll', ['node_key' => 'node2.eu', 'hostname' => 'node2.eu.example.net', 'mx_names' => 'node2.eu.example.net=46']);
         $r->assertSee('/enroll/bootstrap.sh | sudo bash -s -- mre_');
+        $r->assertSee('copy-btn');
         $r->assertSee('node2.eu.example.net=46');
         preg_match('/sudo bash -s -- (mre_[A-Za-z0-9_-]+)/', $r->getBody(), $m);
         $token = $m[1];

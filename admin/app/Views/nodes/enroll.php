@@ -33,11 +33,12 @@ $fb  = static fn ($k) => isset($errors[$k]) ? '<div class="invalid-feedback">' .
     <button type="button" class="btn btn-sm btn-outline-secondary mt-2" hx-get="/nodes/enroll/dns?<?= esc($dnsQuery, 'attr') ?>" hx-target="previous div">DNS erneut prüfen</button>
 </div></div>
 <div class="card mb-3"><div class="card-header"><h3 class="card-title">3. Auf der neuen Node (ein Befehl)</h3></div><div class="card-body">
-<pre class="mono mb-2">curl -fsSL <?= esc($adminUrl) ?>/enroll/bootstrap.sh | sudo bash -s -- <?= esc($token) ?></pre>
+<div class="copy-box mb-2"><pre class="mono copy-src mb-0">curl -fsSL <?= esc($adminUrl) ?>/enroll/bootstrap.sh | sudo bash -s -- <?= esc($token) ?></pre><?= view('components/copy_btn') ?></div>
     <div class="form-hint">Holt MailRunner <?= esc($version) ?> und die Konfiguration dieser Node von hier, prüft DNS, holt das Zertifikat bei Let's Encrypt, installiert Postfix, API und Selbsttest, übernimmt das CA-Zertifikat dieser Admin-Instanz und meldet die Node hier an.</div>
 </div></div>
 <div class="card"><div class="card-header"><h3 class="card-title">4. Danach</h3></div><div class="card-body">
-<pre class="mono">sudo nano /etc/mailrunner/secrets.env     # Spamhaus DQS, blacklistmaster, ipregistry</pre>
+<div class="copy-box mb-3"><pre class="mono copy-src mb-0">sudo nano /etc/mailrunner/secrets.env</pre><?= view('components/copy_btn') ?></div>
+    <div class="form-hint mb-2">Dort die Schlüssel für Spamhaus DQS, blacklistmaster und ipregistry eintragen.</div>
     <ul class="mb-0">
         <li>Die Node erscheint unter <a href="/nodes">Nodes</a>. Projekte legst du beim Kunden an oder ziehst sie auf der Projektseite um.</li>
         <li>Ohne MailRunner Admin geht es auch: Wiki MailRunnerPub, „Installation und Umzug“.</li>

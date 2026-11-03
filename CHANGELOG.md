@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.15 - 2026-11-03
+- Admin: commands on the enrollment page and new project tokens have a copy button; command text is
+  selectable with one click (`assets/admin.js`, no inline script; CSS/JS with cache-busting parameter).
+
 ## 0.1.14 - 2026-11-03
 - `mr:update` without `--version`: an admin update request for a version that is already installed (or
   older) is ignored, so the newest tag is the target (before: "already at …" until the request was replaced).

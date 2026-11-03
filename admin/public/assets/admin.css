@@ -20,3 +20,10 @@
 .htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display: inline-block; }
 .kv dt { color: var(--tblr-secondary); font-weight: 400; }
 .mono { font-family: var(--tblr-font-monospace); font-size: .85rem; }
+/* copyable commands/tokens: text selectable (one click selects all), copy button top right */
+.copy-box { position: relative; }
+.copy-box pre.copy-src { -webkit-user-select: all; user-select: all; cursor: text; white-space: pre-wrap; word-break: break-all; padding: .75rem 3rem .75rem .75rem; }
+.copy-box input.copy-src { padding-right: 3rem; }
+.copy-box .copy-btn { position: absolute; top: .4rem; right: .4rem; padding: .25rem .4rem; line-height: 1; }
+.copy-box .copy-btn .icon-ok, .copy-box .copy-btn.copied .icon-copy { display: none; }
+.copy-box .copy-btn.copied .icon-ok { display: inline; }
