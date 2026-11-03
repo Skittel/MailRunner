@@ -9,6 +9,8 @@
 #     ENTRA_GROUP_RW, ENTRA_GROUP_RO)
 #   - every node: install.sh ... --admin-ca=/etc/mailrunner-admin/mtls/ca.pem (copy the file to remote nodes)
 set -euo pipefail
+# systemd units (mailrunner-update) have no HOME; composer refuses to run without it
+export HOME="${HOME:-/root}" COMPOSER_HOME="${COMPOSER_HOME:-${HOME:-/root}/.config/composer}"
 
 HOST=""; DB_NAME="mailrunner_admin"
 SOURCE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"

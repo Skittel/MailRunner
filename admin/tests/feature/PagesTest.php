@@ -44,6 +44,7 @@ final class PagesTest extends CIUnitTestCase
         $status = ['node_id' => 'node1.eu', 'version' => '0.1.0', 'roles' => ['receive'],
             'selftest' => ['status' => 'fail', 'ok' => 39, 'finished_at' => gmdate('Y-m-d\TH:i:s\Z'), 'duration_ms' => 20000, 'version' => '0.1.0',
                 'failed' => [['name' => 'smtp.v4.certificate', 'detail' => '9 days left']], 'warnings' => []],
+            'last_update' => ['at' => gmdate('Y-m-d\\TH:i:s\\Z'), 'result' => 'update_failed', 'to' => '0.2.0', 'exit' => 1, 'output_tail' => ['The HOME or COMPOSER_HOME environment variable must be set']],
             'counts' => ['messages_24h' => 5, 'messages_unacked' => 2, 'role_mails_unacked' => 1, 'smtp_sessions_24h' => 9]];
         $this->db->table('users')->insert(['entra_oid' => '00000000-0000-0000-0000-000000000001', 'tenant_id' => '00000000-0000-0000-0000-000000000002',
             'name' => 'Test Admin', 'email' => 'admin@example.org', 'created_at' => $now]);
@@ -123,6 +124,7 @@ final class PagesTest extends CIUnitTestCase
         $r->assertSee('Lesen');
         $this->withSession($ro)->get('customers')->assertDontSee('Kunde anlegen');
         $this->withSession($ro)->get('nodes/n0de-0001')->assertDontSee('Konfiguration übernehmen');
+        $this->withSession($this->admin)->get('nodes/n0de-0001')->assertSee('v0.2.0 fehlgeschlagen (exit 1)');
         $this->withSession($ro)->get('projects/pr0j-0001/tokens')->assertDontSee('Sperren');
 
         $r = $this->withSession($ro)->post('customers', ['customer_key' => 'ro-corp', 'name' => 'RO', 'csrf_test_name' => 'testtoken0123456789abcdef']);

@@ -15,6 +15,8 @@
 # The enrollment token (MailRunner Admin -> Nodes -> "Neue Node einrichten", 60 min, single use) also fetches
 # the admin CA and registers the node in MailRunner Admin.
 set -euo pipefail
+# systemd units (mailrunner-update) have no HOME; composer refuses to run without it
+export HOME="${HOME:-/root}" COMPOSER_HOME="${COMPOSER_HOME:-${HOME:-/root}/.config/composer}"
 
 ROLE=""; NODE_ID=""; HOST=""; DB_NAME="mailrunner"; MX_NAMES=""; ADMIN_CA=""; LE_EMAIL=""; ADMIN_URL=""; ENROLL_TOKEN=""; SKIP_DNS=0
 SOURCE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"

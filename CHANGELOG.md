@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.20 - 2026-11-03
+- Automatic updates (mailrunner-update.service) failed on every node: systemd sets no HOME and composer refused
+  to run. install.sh / install-admin.sh set HOME and COMPOSER_HOME themselves; the unit sets HOME=/root.
+- A failed update journals the last installer lines (`output_tail`); `GET /admin/v1/node` reports `last_update`
+  and the admin node card shows a failed or refused update with these lines.
+
 ## 0.1.19 - 2026-11-03
 - Common secrets: MailRunner Admin -> Einstellungen -> "Gemeinsame Schlüssel" (SPAMHAUS_DQS_KEY, BLM_USER, BLM_PASS,
   IPREGISTRYIO_TOKEN). Stored encrypted in the admin database (`/etc/mailrunner-admin/secrets.key`, created by

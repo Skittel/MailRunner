@@ -44,8 +44,18 @@ class Node extends AdminController
             'policy'   => ['updates' => config('Mailrunner')->adminUpdates, 'config' => config('Mailrunner')->adminConfig],
             'pending_changes' => (new PendingChanges())->count(),
             'update_requested' => Updater::forNode()->requested()['version'] ?? null,
+            'last_update' => self::lastUpdate(),
             'secrets'  => \App\Core\Node\CommonSecrets::forNode()->summary() + ['pending_revision' => (new PendingChanges())->openPayload('secrets', 'common')['revision'] ?? null],
         ]);
+    }
+
+    /** Last update attempt (node.updated / node.update_failed / node.update_refused) or null. */
+    private static function lastUpdate(): ?array
+    {
+        $r = db_connect()->table('journal')->select('created_at, event, details')->whereIn('event', ['node.updated', 'node.update_failed', 'node.update_refused'])
+            ->orderBy('id', 'DESC')->limit(1)->get()->getRowArray();
+
+        return $r === null ? null : ['at' => Time::toIso($r['created_at']), 'result' => substr($r['event'], 5)] + (json_decode((string) $r['details'], true) ?: []);
     }
 
     /**

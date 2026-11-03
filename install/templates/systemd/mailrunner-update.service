@@ -6,5 +6,6 @@ After=network-online.target mariadb.service
 Type=oneshot
 # root: the installer manages packages and system files. Code comes from the git tags of MAILRUNNER_SOURCE_DIR,
 # never from MailRunner Admin; mr:update --from-admin never downgrades and does nothing in manual mode.
+Environment=HOME=/root
 ExecStart=/usr/bin/php /opt/mailrunner/current/spark mr:update --from-admin
 TimeoutStartSec=30min

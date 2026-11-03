@@ -30,6 +30,10 @@
             <?php $sec = $s['secrets'] ?? null; if (is_array($sec) && (! empty($sec['push_error']) || ! empty($sec['local_overrides']))): ?><dt class="col-5">Schlüssel</dt><dd class="col-7">
                 <?php if (! empty($sec['push_error'])): ?><span class="text-danger">Verteilung fehlgeschlagen</span><?php endif ?>
                 <?php if (! empty($sec['local_overrides'])): ?><span class="text-secondary">lokal überschrieben: <span class="mono"><?= esc(implode(', ', $sec['local_overrides'])) ?></span></span><?php endif ?></dd><?php endif ?>
+            <?php $lu = $s['last_update'] ?? null; if (is_array($lu) && $lu['result'] !== 'updated' && version_compare((string) ($lu['to'] ?? $lu['version'] ?? '0'), (string) ($s['version'] ?? '0'), '>')): ?>
+                <dt class="col-5">Letztes Update</dt><dd class="col-7 text-danger">v<?= esc($lu['to'] ?? $lu['version'] ?? '?') ?> <?= $lu['result'] === 'update_failed' ? 'fehlgeschlagen (exit ' . (int) ($lu['exit'] ?? 0) . ')' : 'abgelehnt' ?> · <?= ago((string) $lu['at']) ?>
+                <?php foreach (array_slice($lu['output_tail'] ?? $lu['problems'] ?? [], -3) as $l): ?><div class="mono small text-secondary text-truncate" title="<?= esc($l, 'attr') ?>"><?= esc($l) ?></div><?php endforeach ?></dd>
+            <?php endif ?>
             <dt class="col-5">Abgefragt</dt><dd class="col-7"><?= ago($n['last_checked_at']) ?></dd>
         </dl>
         <?php if ($detail && $st): ?>

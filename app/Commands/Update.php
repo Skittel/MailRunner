@@ -67,8 +67,15 @@ class Update extends MrCommand
 
             return null;
         }
-        $code = $updater->run((string) $plan['target'], ! $fromAdmin && $this->flag('force'), static fn (string $line) => CLI::write($line));
-        $this->journal($code === 0 ? 'node.updated' : 'node.update_failed', ['from' => $plan['current'], 'to' => $plan['target'], 'exit' => $code, 'by' => $fromAdmin ? 'admin request' : 'cli']);
+        $tail = [];
+        $code = $updater->run((string) $plan['target'], ! $fromAdmin && $this->flag('force'), static function (string $line) use (&$tail): void {
+            CLI::write($line);
+            if (trim($line) !== '') {
+                $tail = array_slice([...$tail, mb_substr(trim($line), 0, 200)], -8);
+            }
+        });
+        $this->journal($code === 0 ? 'node.updated' : 'node.update_failed', ['from' => $plan['current'], 'to' => $plan['target'], 'exit' => $code, 'by' => $fromAdmin ? 'admin request' : 'cli']
+            + ($code === 0 ? [] : ['output_tail' => $tail])); // why it failed, visible in the admin without SSH
         $code === 0 ? $this->ok('Updated to ' . $plan['target'] . '.') : CLI::error('Installer failed (exit ' . $code . ').');
 
         return $code === 0 ? null : 1;
