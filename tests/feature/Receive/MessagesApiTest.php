@@ -135,4 +135,11 @@ final class MessagesApiTest extends CIUnitTestCase
         $this->withHeaders([])->get('v1/messages')->assertStatus(401);
         $this->withHeaders(['Authorization' => 'Bearer mrt_xxxxxxxxxxxxxxxx.wrong'])->get('v1/messages')->assertStatus(401);
     }
+
+    public function testUnknownEndpointIs404Json(): void
+    {
+        $r = $this->withHeaders([])->get('no/such/endpoint');
+        $r->assertStatus(404);
+        $this->assertSame('NOT_FOUND', json_decode($r->response()->getBody(), true)['error']['code']);
+    }
 }

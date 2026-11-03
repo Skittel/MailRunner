@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.18 - 2026-11-03
+- Node API: unknown endpoints (e.g. `/`) answer 404 with the JSON error again (was HTTP 500 with a stray `""`).
+
 ## 0.1.17 - 2026-11-03
 - install.sh and `mr:update` take a lock (`/run/lock/mailrunner-install.lock`, `/run/lock/mailrunner-update.lock`):
   two parallel updates restarted milter/unbound under each other's self test (454 "Try again later").

@@ -8,7 +8,8 @@ use CodeIgniter\Router\RouteCollection;
  *
  * @var RouteCollection $routes
  */
-$routes->set404Override(static fn () => ApiResponse::error(404, 'NOT_FOUND', 'Unknown endpoint')->send());
+// the closure's echoed string becomes the body; error() sets status 404 and headers on the shared response
+$routes->set404Override(static fn (): string => ApiResponse::error(404, 'NOT_FOUND', 'Unknown endpoint')->getBody());
 
 $routes->group('v1', ['filter' => 'bearer'], static function (RouteCollection $routes): void {
     $routes->get('node/status', '\App\Controllers\V1\NodeStatus::show');
