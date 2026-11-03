@@ -14,15 +14,16 @@ final class Enrollment
 
     /**
      * MX names "name=46, name4=4 name6=6": comma and/or spaces as separator. Returns the entries normalized
-     * ("a=46, b=4") or null if one is invalid.
+     * ("a=46, b=4") or null if one is invalid. A name without "=..." gets "=46" (IPv4 and IPv6).
      */
     public static function normalizeMxNames(string $value): ?string
     {
         $entries = preg_split('/[\s,]+/', strtolower(trim($value)), -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        foreach ($entries as $e) {
-            if (! preg_match('/^([a-z0-9.-]+)=(4|6|46)$/', $e, $m) || ! preg_match(self::HOSTNAME, $m[1])) {
+        foreach ($entries as $i => $e) {
+            if (! preg_match('/^([a-z0-9.-]+)(?:=(4|6|46))?$/', $e, $m) || ! preg_match(self::HOSTNAME, $m[1])) {
                 return null;
             }
+            $entries[$i] = $m[1] . '=' . ($m[2] ?? '46');
         }
 
         return implode(', ', $entries);

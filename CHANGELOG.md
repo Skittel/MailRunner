@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.12 - 2026-11-03
+- Admin enrollment form: an MX name without "=4|6|46" is accepted and stored as "=46" (IPv4 and IPv6),
+  as the self test and the DNS check already treated it.
+
 ## 0.1.11 - 2026-11-02
 - Self test: the Spamhaus DQS check retries once after 3 s on SERVFAIL/timeout (unbound right after an
   install answered SERVFAIL; false failure in the install self test).

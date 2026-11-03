@@ -167,7 +167,7 @@ class Nodes extends BaseController
         }
         $mx = Enrollment::normalizeMxNames($d['mx_names']);
         if ($mx === null) {
-            $errors['mx_names'] = 'Format: name=46, name4=4, name6=6 (Komma oder Leerzeichen)';
+            $errors['mx_names'] = 'Format: name=46, name4=4, name6=6 (Komma oder Leerzeichen; ohne =… gilt 46)';
         } else {
             $d['mx_names'] = $mx;
         }
