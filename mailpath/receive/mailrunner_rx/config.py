@@ -6,6 +6,7 @@ DATA_DIR = os.environ.get("MR_DATA_DIR", "/var/lib/mailrunner")
 
 NODE_KEY_FILE = os.path.join(CONFIG_DIR, "node.key")
 SECRETS_FILE = os.path.join(CONFIG_DIR, "secrets.env")
+COMMON_SECRETS_FILE = os.path.join(DATA_DIR, "secrets", "common.env")  # from MailRunner Admin; local values win
 ROUTES_FILE = os.path.join(CONFIG_DIR, "generated", "current", "routes.json")
 SPOOL_DIR = os.path.join(DATA_DIR, "receive", "spool")
 STORE_DIR = os.path.join(DATA_DIR, "receive", "store")

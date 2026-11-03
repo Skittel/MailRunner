@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.19 - 2026-11-03
+- Common secrets: MailRunner Admin -> Einstellungen -> "Gemeinsame Schlüssel" (SPAMHAUS_DQS_KEY, BLM_USER, BLM_PASS,
+  IPREGISTRYIO_TOKEN). Stored encrypted in the admin database (`/etc/mailrunner-admin/secrets.key`, created by
+  install-admin.sh), never shown again. Every save gets a new revision; the admin pushes the full set to every node
+  whose reported revision differs (on save and with the minute poll, so new and offline nodes catch up).
+- Node: `PUT /admin/v1/node/secrets` writes `/var/lib/mailrunner/secrets/common.env` (user mailrunner, 0600);
+  a non-empty value in the local `/etc/mailrunner/secrets.env` always wins (the API cannot write that file).
+  `GET /admin/v1/node` reports names only (revision, common, local, local_overrides, pending_revision).
+  `MAILRUNNER_ADMIN_CONFIG=manual`: the set waits encrypted with the node key; `mr:config:apply` shows
+  set/changed/removed per name, never values. Journal `node.secrets_updated` (names only).
+- Secret scan and self test redaction include the common secrets.
+
 ## 0.1.18 - 2026-11-03
 - Node API: unknown endpoints (e.g. `/`) answer 404 with the JSON error again (was HTTP 500 with a stray `""`).
 

@@ -269,4 +269,43 @@ final class PagesTest extends CIUnitTestCase
         $this->assertNull($c->accessFor(['cccccccc-0000-0000-0000-000000000003']));
         $this->assertNull($c->accessFor([]));
     }
+
+    public function testCommonSecretsStoredEncryptedNeverShown(): void
+    {
+        $key = sys_get_temp_dir() . '/mra-key-' . bin2hex(random_bytes(4));
+        file_put_contents($key, base64_encode(random_bytes(32)));
+        config('Admin')->secretsKeyFile = $key;
+
+        $r = $this->withSession($this->admin)->get('settings');
+        $r->assertOK();
+        $r->assertSee('Gemeinsame Schlüssel');
+        $r->assertSee('nicht gesetzt');
+        $this->postAs('settings/secrets', ['value' => ['SPAMHAUS_DQS_KEY' => 'dqs-secret-value-123', 'EVIL' => 'x']])->assertRedirectTo(site_url('settings'));
+        $row = $this->db->table('common_secrets')->where('name', 'SPAMHAUS_DQS_KEY')->get()->getRowArray();
+        $this->assertStringNotContainsString('dqs-secret-value-123', $row['value_enc']);
+        $this->dontSeeInDatabase('common_secrets', ['name' => 'EVIL']);
+        $store = \App\Libraries\CommonSecrets::make();
+        $this->assertSame(['SPAMHAUS_DQS_KEY' => 'dqs-secret-value-123'], $store->values());
+        $rev = $store->revision();
+        $this->assertMatchesRegularExpression('/^[0-9a-z]{4}-[0-9a-z]{4}$/', (string) $rev);
+        $page = $this->withSession($this->admin)->get('settings');
+        $page->assertSee('gesetzt');
+        $page->assertDontSee('dqs-secret-value-123');
+        $this->assertStringNotContainsString('dqs-secret-value-123', (string) $this->db->table('audit_log')->select('details')->get()->getRow('details'));
+
+        // empty field = unchanged (no new revision), delete removes
+        $this->postAs('settings/secrets', ['value' => ['SPAMHAUS_DQS_KEY' => '']]);
+        $this->assertSame($rev, $store->revision());
+        $this->postAs('settings/secrets', ['delete' => ['SPAMHAUS_DQS_KEY' => '1']]);
+        $this->assertSame([], $store->values());
+        $this->assertNotSame($rev, $store->revision());
+        unlink($key);
+    }
+
+    public function testReadOnlyCannotSaveSecrets(): void
+    {
+        $r = $this->withSession(['access' => 'ro'] + $this->admin)->post('settings/secrets', ['value' => ['BLM_USER' => 'x'], 'csrf_test_name' => 'testtoken0123456789abcdef']);
+        $r->assertStatus(403);
+        $this->dontSeeInDatabase('common_secrets', ['name' => 'BLM_USER']);
+    }
 }

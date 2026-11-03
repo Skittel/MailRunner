@@ -27,6 +27,7 @@ $routes->group('v1', ['filter' => 'bearer'], static function (RouteCollection $r
 $routes->group('admin/v1', ['filter' => 'admincert'], static function (RouteCollection $routes): void {
     $routes->get('node', '\App\Controllers\Admin\V1\Node::show');
     $routes->put('node/update', '\App\Controllers\Admin\V1\Node::requestUpdate');
+    $routes->put('node/secrets', '\App\Controllers\Admin\V1\Node::putSecrets');
     $routes->get('journal', '\App\Controllers\Admin\V1\Node::journal');
     $routes->get('customers', '\App\Controllers\Admin\V1\Customers::index');
     $routes->put('customers/(:segment)', '\App\Controllers\Admin\V1\Customers::put/$1');

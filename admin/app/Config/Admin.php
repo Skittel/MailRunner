@@ -31,6 +31,9 @@ class Admin extends BaseConfig
     public string $mtlsKey = '/etc/mailrunner-admin/mtls/client.key';
 
     /** Timeout for node admin API calls (seconds). */
+    /** Key for the common secrets in the database (32 bytes base64, install-admin.sh). */
+    public string $secretsKeyFile = '/etc/mailrunner-admin/secrets.key';
+
     public int $nodeTimeout = 15;
 
     public function __construct()
@@ -43,6 +46,7 @@ class Admin extends BaseConfig
         $this->groupsRo          = self::idList(env('ENTRA_GROUP_RO')) ?: $this->groupsRo;
         $this->mtlsCert          = (string) (env('MTLS_CERT') ?? $this->mtlsCert);
         $this->mtlsKey           = (string) (env('MTLS_KEY') ?? $this->mtlsKey);
+        $this->secretsKeyFile    = (string) (env('SECRETS_KEY_FILE') ?? $this->secretsKeyFile);
     }
 
     /** @return list<string> */

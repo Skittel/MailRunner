@@ -190,4 +190,42 @@ final class AdminApiTest extends CIUnitTestCase
         $this->assertSame(['99.0.0', 'auto'], [$b['update_requested'], $b['policy']['updates']]);
         exec('rm -rf ' . escapeshellarg($dir));
     }
+
+    public function testCommonSecretsAutoAndManual(): void
+    {
+        $dir = sys_get_temp_dir() . '/mr-secrets-' . bin2hex(random_bytes(4));
+        mkdir($dir . '/config', 0o700, true);
+        file_put_contents($dir . '/config/node.key', base64_encode(str_repeat("\x02", 32)));
+        file_put_contents($dir . '/config/secrets.env', "SPAMHAUS_DQS_KEY=localkey1234567\nBLM_USER=\n");
+        config('Mailrunner')->dataDir   = $dir . '/data';
+        config('Mailrunner')->configDir = $dir . '/config';
+        $file = $dir . '/data/secrets/common.env';
+
+        [$s, $b] = $this->api('put', 'admin/v1/node/secrets', ['revision' => 'ab12-cd34', 'values' => ['EVIL' => 'x']]);
+        $this->assertSame([422, 'INVALID_SECRETS'], [$s, $b['error']['code']]);
+        [$s, $b] = $this->api('put', 'admin/v1/node/secrets', ['revision' => 'ab12-cd34', 'values' => ['SPAMHAUS_DQS_KEY' => 'central-dqs-0001', 'BLM_USER' => 'central-user']]);
+        $this->assertSame([200, ['SPAMHAUS_DQS_KEY', 'BLM_USER']], [$s, $b['keys']]);
+        $this->assertStringContainsString('BLM_USER=central-user', (string) file_get_contents($file));
+        $this->assertSame('0600', substr(sprintf('%o', fileperms($file)), -4));
+        [$s, $b] = $this->api('get', 'admin/v1/node');
+        $this->assertSame(['ab12-cd34', ['SPAMHAUS_DQS_KEY'], null], [$b['secrets']['revision'], $b['secrets']['local_overrides'], $b['secrets']['pending_revision']]);
+        $this->assertStringNotContainsString('central-dqs', json_encode($b)); // never values
+        $journal = $this->db->table('journal')->where('event', 'node.secrets_updated')->get()->getRowArray();
+        $this->assertStringNotContainsString('central', (string) $journal['details']);
+
+        // manual: stored encrypted, preview shows names only, mr:config:apply writes the file
+        config('Mailrunner')->adminConfig = 'manual';
+        [$s] = $this->api('put', 'admin/v1/node/secrets', ['revision' => 'ef56-gh78', 'values' => ['SPAMHAUS_DQS_KEY' => 'central-dqs-0002']]);
+        $this->assertSame(202, $s);
+        $row = $this->db->table('admin_pending_changes')->where('kind', 'secrets')->get()->getRowArray();
+        $this->assertStringNotContainsString('central-dqs-0002', $row['payload']);
+        $preview = (new \App\Core\Admin\AdminChanges())->preview('secrets', 'common', json_decode($row['payload'], true));
+        $this->assertEquals(['SPAMHAUS_DQS_KEY' => ['set', 'changed'], 'BLM_USER' => ['set', 'removed']], $preview);
+        [$s, $b] = $this->api('get', 'admin/v1/node');
+        $this->assertSame(['ab12-cd34', 'ef56-gh78'], [$b['secrets']['revision'], $b['secrets']['pending_revision']]);
+        command('mr:config:apply --silent');
+        $this->assertStringContainsString('SPAMHAUS_DQS_KEY=central-dqs-0002', (string) file_get_contents($file));
+        $this->assertStringNotContainsString('BLM_USER', (string) file_get_contents($file));
+        exec('rm -rf ' . escapeshellarg($dir));
+    }
 }

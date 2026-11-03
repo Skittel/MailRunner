@@ -27,7 +27,7 @@
     <header class="navbar-expand-md">
         <div class="navbar">
             <div class="container-xl">
-                <?php $nav = ['/' => 'Übersicht', '/nodes' => 'Nodes', '/customers' => 'Kunden', '/role-mails' => 'postmaster & abuse', '/audit' => 'Protokoll'];
+                <?php $nav = ['/' => 'Übersicht', '/nodes' => 'Nodes', '/customers' => 'Kunden', '/role-mails' => 'postmaster & abuse', '/audit' => 'Protokoll', '/settings' => 'Einstellungen'];
                 $path = '/' . trim(service('request')->getUri()->getPath(), '/'); ?>
                 <ul class="navbar-nav">
                     <?php foreach ($nav as $href => $label): $active = $href === '/' ? $path === '/' : str_starts_with($path, $href); ?>

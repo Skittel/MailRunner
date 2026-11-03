@@ -57,4 +57,7 @@ $routes->group('', ['filter' => 'adminauth'], static function (RouteCollection $
     $routes->get('role-mails/(:pid)/(:segment)', 'RoleMails::show/$1/$2');
 
     $routes->get('audit', 'AuditLog::index');
+
+    $routes->get('settings', 'Settings::index');
+    $routes->post('settings/secrets', 'Settings::saveSecrets');
 });

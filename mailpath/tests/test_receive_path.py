@@ -106,6 +106,17 @@ class SecretsTest(unittest.TestCase):
             self.assertEqual({"SPAMHAUS_DQS_KEY": "abc123", "BLM_USER": "user"}, secrets.load(path))
             self.assertEqual({}, secrets.load(os.path.join(tmp, "missing")))
 
+    def test_common_secrets_from_admin_local_values_win(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            common, local = os.path.join(tmp, "common.env"), os.path.join(tmp, "secrets.env")
+            with open(common, "w") as fh:
+                fh.write("# revision=abcd-1234\nSPAMHAUS_DQS_KEY=central\nBLM_USER=central-user\n")
+            with open(local, "w") as fh:
+                fh.write("SPAMHAUS_DQS_KEY=local\nBLM_USER=\n")  # empty local value: the central one stays
+            with mock.patch.object(secrets.config, "SECRETS_FILE", local):
+                self.assertEqual({"SPAMHAUS_DQS_KEY": "local", "BLM_USER": "central-user"}, secrets.load(common=common))
+
     def test_blacklistmaster_skips_selftests_and_non_public_addresses(self):
         from mailrunner_rx import blacklistmaster
         self.assertEqual({"status": "skipped", "reason": "selftest"}, blacklistmaster.check("192.0.2.1", "selftest-abc", "u", "p"))

@@ -81,8 +81,47 @@ class AdminChanges
      *
      * @return array<string, array{0: mixed, 1: mixed}>
      */
+    /**
+     * Writes the common secrets and journals the names (never values).
+     *
+     * @param array<string, string> $values
+     */
+    public function secrets(string $revision, array $values, ChangeContext $ctx): void
+    {
+        $store = \App\Core\Node\CommonSecrets::forNode();
+        $store->write($values, $revision);
+        \App\Core\Support\Transaction::run(db_connect(), static fn () => service('journalWriter')->append('node.secrets_updated', $ctx, null, null,
+            ['revision' => $revision, 'keys' => array_keys($values), 'local_overrides' => $store->summary()['local_overrides']]));
+    }
+
+    /** @return array<string, string> values of a queued secrets change (encrypted with the node key) */
+    public static function decryptSecrets(array $payload): array
+    {
+        $json = \App\Core\Secrets\NodeCrypto::forNode()->decrypt((string) base64_decode((string) ($payload['enc'] ?? ''), true), 'admin-secrets:' . ($payload['revision'] ?? ''));
+
+        return json_decode($json, true) ?: [];
+    }
+
     public function preview(string $kind, string $ref, array $body): array
     {
+        if ($kind === 'secrets') { // names and set/changed/removed only, never values
+            $now  = \App\Core\Node\CommonSecrets::parse(config('Mailrunner')->commonSecretsFile());
+            $want = self::decryptSecrets($body);
+            $diff = [];
+            foreach (array_unique([...array_keys($now), ...array_keys($want)]) as $k) {
+                $state = match (true) {
+                    ! isset($want[$k])     => [ 'set', 'removed'],
+                    ! isset($now[$k])      => [null, 'set'],
+                    $now[$k] !== $want[$k] => ['set', 'changed'],
+                    default                => null,
+                };
+                if ($state !== null) {
+                    $diff[$k] = $state;
+                }
+            }
+
+            return $diff;
+        }
         if ($kind === 'token_revoke') {
             return ['revoke' => [$ref, 'revoked']];
         }

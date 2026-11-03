@@ -27,6 +27,9 @@
                 · Konfiguration <?= ($pol['config'] ?? 'auto') === 'manual' ? '<span class="badge bg-orange-lt">manuell</span>' : '<span class="badge bg-green-lt">auto</span>' ?></dd>
             <?php if (! empty($s['pending_changes'])): ?><dt class="col-5">Wartet auf Freigabe</dt><dd class="col-7 text-warning"><?= (int) $s['pending_changes'] ?> Änderung(en) · <code>sudo mailrunner mr:config:apply</code></dd><?php endif ?>
             <?php if (! empty($s['update_requested']) && version_compare((string) $s['update_requested'], (string) ($s['version'] ?? '0'), '>')): ?><dt class="col-5">Update</dt><dd class="col-7 text-warning">v<?= esc($s['update_requested']) ?> angefordert<?= ($pol['updates'] ?? 'auto') === 'manual' ? ' · an der Node: <code>sudo mailrunner mr:update</code>' : '' ?></dd><?php endif ?>
+            <?php $sec = $s['secrets'] ?? null; if (is_array($sec) && (! empty($sec['push_error']) || ! empty($sec['local_overrides']))): ?><dt class="col-5">Schlüssel</dt><dd class="col-7">
+                <?php if (! empty($sec['push_error'])): ?><span class="text-danger">Verteilung fehlgeschlagen</span><?php endif ?>
+                <?php if (! empty($sec['local_overrides'])): ?><span class="text-secondary">lokal überschrieben: <span class="mono"><?= esc(implode(', ', $sec['local_overrides'])) ?></span></span><?php endif ?></dd><?php endif ?>
             <dt class="col-5">Abgefragt</dt><dd class="col-7"><?= ago($n['last_checked_at']) ?></dd>
         </dl>
         <?php if ($detail && $st): ?>

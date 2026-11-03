@@ -29,6 +29,7 @@ class Sync
         try {
             $status = $this->client($node)->ok('GET', 'node');
             $status = $this->offerUpdate($node, $status);
+            $status = $this->offerSecrets($node, $status);
             db_connect()->table('nodes')->where('id', $node['id'])->update([
                 'last_checked_at' => $now, 'last_ok_at' => $now, 'last_error' => null,
                 'last_status' => json_encode($status, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
@@ -146,6 +147,41 @@ class Sync
         }
 
         return $this->requestUpdate($node, $mine) === null ? ['update_requested' => $mine] + $status : $status;
+    }
+
+    /**
+     * Pushes the common secrets when the node reports another revision (and has none waiting for approval).
+     * Nodes without the endpoint (older versions) report no "secrets" and are skipped until they are updated.
+     */
+    private function offerSecrets(array $node, array $status): array
+    {
+        $store = CommonSecrets::make();
+        $rev   = $store->revision();
+        $its   = $status['secrets'] ?? null;
+        if ($rev === null || ! is_array($its) || ($its['revision'] ?? null) === $rev || ($its['pending_revision'] ?? null) === $rev) {
+            return $status;
+        }
+        $err = $this->pushSecrets($node);
+        if ($err !== null) {
+            $status['secrets']['push_error'] = $err;
+        } else {
+            $status = $this->client($node)->ok('GET', 'node'); // fresh state (revision or pending_revision)
+        }
+
+        return $status;
+    }
+
+    /** Sends the full common set to one node; null or the error. */
+    public function pushSecrets(array $node): ?string
+    {
+        $store = CommonSecrets::make();
+        try {
+            $this->client($node)->ok('PUT', 'node/secrets', ['revision' => (string) $store->revision(), 'values' => (object) $store->values()]);
+
+            return null;
+        } catch (Throwable $e) {
+            return $e->getMessage();
+        }
     }
 
     /** Asks a node to update to $version; null or the error. */

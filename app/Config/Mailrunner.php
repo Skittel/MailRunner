@@ -47,6 +47,12 @@ class Mailrunner extends BaseConfig
     /** Git checkout the node is installed from (install.sh writes it); mr:update works there. */
     public string $sourceDir = '/opt/src/MailRunner';
 
+    /**
+     * Credentials MailRunner Admin may distribute to all nodes (common secrets, admin settings). They are written to
+     * commonSecretsFile(); a non-empty value of the same name in secrets.env (local) wins.
+     */
+    public const COMMON_SECRET_KEYS = ['SPAMHAUS_DQS_KEY', 'BLM_USER', 'BLM_PASS', 'IPREGISTRYIO_TOKEN'];
+
     /** Days the journal keeps delivery attempts (smtp.connection / smtp.attempt). */
     public int $smtpJournalDays = 30;
 
@@ -86,6 +92,12 @@ class Mailrunner extends BaseConfig
     public function updateRequestFile(): string
     {
         return $this->dataDir . '/update/desired.json';
+    }
+
+    /** Common secrets from MailRunner Admin (written by the node API as user mailrunner, 0600). */
+    public function commonSecretsFile(): string
+    {
+        return $this->dataDir . '/secrets/common.env';
     }
 
     public function receiveStoreDir(): string

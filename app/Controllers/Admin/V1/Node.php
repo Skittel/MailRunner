@@ -44,7 +44,31 @@ class Node extends AdminController
             'policy'   => ['updates' => config('Mailrunner')->adminUpdates, 'config' => config('Mailrunner')->adminConfig],
             'pending_changes' => (new PendingChanges())->count(),
             'update_requested' => Updater::forNode()->requested()['version'] ?? null,
+            'secrets'  => \App\Core\Node\CommonSecrets::forNode()->summary() + ['pending_revision' => (new PendingChanges())->openPayload('secrets', 'common')['revision'] ?? null],
         ]);
+    }
+
+    /**
+     * PUT /admin/v1/node/secrets {"revision": "xxxx-xxxx", "values": {"SPAMHAUS_DQS_KEY": "..."}} - replaces the common
+     * secrets (full desired state). MAILRUNNER_ADMIN_CONFIG=manual: stored encrypted with the node key until
+     * mr:config:apply. Values are never returned or journaled, only names.
+     */
+    public function putSecrets()
+    {
+        $body     = $this->body();
+        $revision = (string) ($body['revision'] ?? '');
+        $values   = is_array($body['values'] ?? null) ? $body['values'] : [];
+        if (($err = \App\Core\Node\CommonSecrets::invalid($values, $revision)) !== null) {
+            return ApiResponse::error(422, 'INVALID_SECRETS', $err);
+        }
+        if ($this->configManual()) {
+            $enc = base64_encode(\App\Core\Secrets\NodeCrypto::forNode()->encrypt(json_encode($values), 'admin-secrets:' . $revision));
+
+            return $this->queued('secrets', 'common', ['revision' => $revision, 'keys' => array_keys($values), 'enc' => $enc]);
+        }
+        (new \App\Core\Admin\AdminChanges())->secrets($revision, $values, $this->ctx());
+
+        return ApiResponse::ok(['revision' => $revision, 'keys' => array_keys($values)]);
     }
 
     /**

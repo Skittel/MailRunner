@@ -116,6 +116,7 @@ fi
 log "System user and directories"
 getent passwd mailrunner >/dev/null || useradd --system --user-group --home-dir /var/lib/mailrunner --shell /usr/sbin/nologin mailrunner
 install -d -o root -g mailrunner -m 0750 /etc/mailrunner /etc/mailrunner/generated
+install -d -o mailrunner -g mailrunner -m 0700 /var/lib/mailrunner/secrets   # common secrets from MailRunner Admin
 install -d -o mailrunner -g mailrunner -m 0750 /var/lib/mailrunner /var/lib/mailrunner/receive \
     /var/lib/mailrunner/receive/spool /var/lib/mailrunner/receive/spool/tmp /var/lib/mailrunner/receive/spool/new \
     /var/lib/mailrunner/receive/spool/analyzed /var/lib/mailrunner/receive/spool/failed /var/lib/mailrunner/receive/store \
@@ -177,6 +178,8 @@ if [[ ! -f /etc/mailrunner/secrets.env ]]; then
     install -o root -g mailrunner -m 0640 /dev/null /etc/mailrunner/secrets.env
     cat > /etc/mailrunner/secrets.env <<'SECRETS'
 # MailRunner node credentials for the analysis (root:mailrunner 0640). Never commit.
+# Values can also come centrally from MailRunner Admin (Einstellungen -> Gemeinsame Schlüssel,
+# /var/lib/mailrunner/secrets/common.env). A non-empty value here wins over the central one.
 # Same names as SmartMailFlow's secrets.env. Empty = not used.
 
 # Spamhaus Data Query Service key (DNSBL via zen.dq.spamhaus.net)

@@ -38,6 +38,14 @@ class PendingChanges
         return array_map(static fn ($r) => ['payload' => json_decode($r['payload'], true) ?: []] + $r, $rows);
     }
 
+    /** Payload of the open change for this object, or null. */
+    public function openPayload(string $kind, string $ref): ?array
+    {
+        $row = db_connect()->table('admin_pending_changes')->select('payload')->where('kind', $kind)->where('ref', $ref)->where('decided_at', null)->get()->getRow('payload');
+
+        return $row === null ? null : (json_decode($row, true) ?: []);
+    }
+
     public function count(): int
     {
         return db_connect()->table('admin_pending_changes')->where('decided_at', null)->countAllResults();
@@ -57,6 +65,7 @@ class PendingChanges
                 'customer'     => $changes->customer($change['ref'], $change['payload'], $ctx),
                 'project'      => $changes->project($change['ref'], $change['payload'], $ctx),
                 'token_revoke' => $changes->revokeToken($change['ref'], $ctx),
+                'secrets'      => $changes->secrets((string) $change['payload']['revision'], AdminChanges::decryptSecrets($change['payload']), $ctx),
             };
             $this->decide((int) $change['id'], 'applied', $approvedBy, null);
 

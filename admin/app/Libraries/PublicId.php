@@ -20,11 +20,19 @@ final class PublicId
     {
         $db = db_connect();
         do {
-            $id = '';
-            for ($i = 0; $i < 8; $i++) {
-                $id .= self::ALPHABET[random_int(0, 35)] . ($i === 3 ? '-' : '');
-            }
+            $id = self::random();
         } while ($db->table($table)->where('public_id', $id)->countAllResults() > 0);
+
+        return $id;
+    }
+
+    /** A random id in the same format (no uniqueness check), e.g. a revision. */
+    public static function random(): string
+    {
+        $id = '';
+        for ($i = 0; $i < 8; $i++) {
+            $id .= self::ALPHABET[random_int(0, 35)] . ($i === 3 ? '-' : '');
+        }
 
         return $id;
     }

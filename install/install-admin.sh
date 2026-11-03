@@ -37,6 +37,10 @@ DATA=/var/lib/mailrunner-admin
 log "System user and directories"
 getent passwd mailrunner-admin >/dev/null || useradd --system --user-group --home-dir "$DATA" --shell /usr/sbin/nologin mailrunner-admin
 install -d -o root -g mailrunner-admin -m 0750 "$CONF" "$CONF/mtls"
+if [[ ! -f "$CONF/secrets.key" ]]; then   # common secrets in the admin database are encrypted with it (back it up)
+    ( umask 077; head -c 32 /dev/urandom | base64 > "$CONF/secrets.key" )
+fi
+chown root:mailrunner-admin "$CONF/secrets.key"; chmod 0640 "$CONF/secrets.key"
 install -d -o mailrunner-admin -g mailrunner-admin -m 0750 "$DATA" "$DATA/writable" "$DATA/writable/cache" "$DATA/writable/logs" \
     "$DATA/writable/session" "$DATA/writable/uploads" "$DATA/writable/debugbar"
 install -d -m 0755 /opt/mailrunner-admin /opt/mailrunner-admin/releases

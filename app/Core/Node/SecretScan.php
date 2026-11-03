@@ -45,7 +45,7 @@ class SecretScan
     {
         $c = config('Mailrunner');
 
-        return new self($db, glob($c->configDir . '/*.env') ?: [], $c->nodeKeyFile(),
+        return new self($db, [...(glob($c->configDir . '/*.env') ?: []), $c->commonSecretsFile()], $c->nodeKeyFile(),
             array_values(array_unique([$c->dataDir, rtrim(WRITEPATH, '/')])),
             [$c->receiveSpoolDir(), $c->receiveStoreDir(), rtrim(WRITEPATH, '/') . '/session'], $c->dataDir . '/secret-scan-accepted.json');
     }

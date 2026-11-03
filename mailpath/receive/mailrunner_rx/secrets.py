@@ -4,16 +4,26 @@ KEY=VALUE lines, '#' comments. Same names as SmartMailFlow's secrets.env:
   SPAMHAUS_DQS_KEY  Spamhaus Data Query Service key (DNSBL via zen.dq.spamhaus.net)
   BLM_USER, BLM_PASS  blacklistmaster.com API credentials (both needed)
 Empty values count as not set. A missing file means: no credentials.
+
+Common secrets distributed by MailRunner Admin (<data dir>/secrets/common.env) are loaded first; every
+non-empty value in the local secrets.env wins.
 """
 import os
 
 from . import config
 
 
-def load(path=None):
-    path = path or config.SECRETS_FILE
+def load(path=None, common=None):
+    if path is None:  # node default: common secrets from the admin, then local overrides
+        values = _read(common or config.COMMON_SECRETS_FILE)
+        values.update(_read(config.SECRETS_FILE))
+        return values
+    return _read(path)
+
+
+def _read(path):
     values = {}
-    if not os.path.exists(path):
+    if not os.access(path, os.R_OK):  # missing (or not ours): no credentials
         return values
     with open(path) as fh:
         for line in fh:
