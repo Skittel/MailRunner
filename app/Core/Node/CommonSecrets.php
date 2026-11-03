@@ -87,14 +87,19 @@ class CommonSecrets
     /**
      * Names only, never values: which secret is set centrally, which locally, which one is used.
      *
-     * @return array{revision: ?string, common: list<string>, local: list<string>, local_overrides: list<string>}
+     * local_same: local value equals the central one (comparison on the node, no value leaves it).
+     *
+     * @return array{revision: ?string, common: list<string>, local: list<string>, local_overrides: list<string>, local_same: list<string>}
      */
     public function summary(): array
     {
-        $common = array_keys(self::parse($this->file));
-        $local  = array_values(array_intersect(array_keys(self::parse($this->localFile)), Mailrunner::COMMON_SECRET_KEYS));
+        $commonValues = self::parse($this->file);
+        $localValues  = array_intersect_key(self::parse($this->localFile), array_flip(Mailrunner::COMMON_SECRET_KEYS));
+        $overrides    = array_values(array_intersect(array_keys($commonValues), array_keys($localValues)));
+        $same         = array_values(array_filter($overrides, static fn ($k) => hash_equals($commonValues[$k], $localValues[$k])));
 
-        return ['revision' => $this->revision(), 'common' => $common, 'local' => $local, 'local_overrides' => array_values(array_intersect($common, $local))];
+        return ['revision' => $this->revision(), 'common' => array_keys($commonValues), 'local' => array_keys($localValues),
+            'local_overrides' => array_values(array_diff($overrides, $same)), 'local_same' => $same];
     }
 
     /** @return array<string, string> non-empty values */

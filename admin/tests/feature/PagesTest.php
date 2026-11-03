@@ -292,6 +292,7 @@ final class PagesTest extends CIUnitTestCase
         $this->assertMatchesRegularExpression('/^[0-9a-z]{4}-[0-9a-z]{4}$/', (string) $rev);
         $page = $this->withSession($this->admin)->get('settings');
         $page->assertSee('gesetzt');
+        $page->assertSee('dq…23 (20 Zeichen)');
         $page->assertDontSee('dqs-secret-value-123');
         $this->assertStringNotContainsString('dqs-secret-value-123', (string) $this->db->table('audit_log')->select('details')->get()->getRow('details'));
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.22 - 2026-11-03
+- Admin settings: every common secret shows its first and last two characters and the length for comparison
+  (shorter than 8 characters: length only). Per node: "zentral", "lokal, gleicher Wert wie zentral",
+  "lokal abweichend (hat Vorrang)", "nur lokal".
+- Node: `secrets.local_same` (the node compares local and central values itself; no value leaves the node).
+
 ## 0.1.21 - 2026-11-03
 - Secret scan: accepted findings match by place and value fingerprint, no longer by the file name; the same value
   in secrets.env and common.env no longer re-opens an accepted finding. Findings name the local file first.

@@ -98,6 +98,19 @@ class CommonSecrets
         return $out;
     }
 
+    /**
+     * Masked values for comparison: first two and last two characters ("ab…yz", 12 Zeichen).
+     * Values shorter than 8 characters show only their length (two plus two would reveal most of them).
+     *
+     * @return array<string, string>
+     */
+    public function hints(): array
+    {
+        return array_map(static fn (string $v): string => strlen($v) >= 8
+            ? substr($v, 0, 2) . '…' . substr($v, -2) . ' (' . strlen($v) . ' Zeichen)'
+            : '•••• (' . strlen($v) . ' Zeichen)', $this->values());
+    }
+
     /** Value is acceptable for a node (same rules as the node). */
     public static function validValue(string $v): bool
     {

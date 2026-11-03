@@ -209,6 +209,10 @@ final class AdminApiTest extends CIUnitTestCase
         $this->assertSame('0600', substr(sprintf('%o', fileperms($file)), -4));
         [$s, $b] = $this->api('get', 'admin/v1/node');
         $this->assertSame(['ab12-cd34', ['SPAMHAUS_DQS_KEY'], null], [$b['secrets']['revision'], $b['secrets']['local_overrides'], $b['secrets']['pending_revision']]);
+        file_put_contents($dir . '/config/secrets.env', "SPAMHAUS_DQS_KEY=central-dqs-0001\n"); // same value locally
+        [$s, $b] = $this->api('get', 'admin/v1/node');
+        $this->assertSame([[], ['SPAMHAUS_DQS_KEY']], [$b['secrets']['local_overrides'], $b['secrets']['local_same']]);
+        file_put_contents($dir . '/config/secrets.env', "SPAMHAUS_DQS_KEY=localkey1234567\nBLM_USER=\n");
         $this->assertStringNotContainsString('central-dqs', json_encode($b)); // never values
         $journal = $this->db->table('journal')->where('event', 'node.secrets_updated')->get()->getRowArray();
         $this->assertStringNotContainsString('central', (string) $journal['details']);

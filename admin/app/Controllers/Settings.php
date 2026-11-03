@@ -16,6 +16,7 @@ class Settings extends BaseController
         return view('settings/index', [
             'keys'     => CommonSecrets::KEYS,
             'secrets'  => $store->overview(),
+            'hints'    => $store->hints(),
             'revision' => $store->revision(),
             'nodes'    => db_connect()->table('nodes')->where('enabled', 1)->orderBy('node_key')->get()->getResultArray(),
         ]);

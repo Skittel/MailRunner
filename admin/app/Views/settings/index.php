@@ -8,11 +8,12 @@
     <div class="card-header"><h3 class="card-title">Gemeinsame Schlüssel für alle Nodes</h3></div>
     <div class="card-body">
         <p class="text-secondary small">Werte werden verschlüsselt gespeichert und nie wieder angezeigt. Leeres Feld = unverändert.
-            Ein Wert in <span class="mono">/etc/mailrunner/secrets.env</span> einer Node hat dort Vorrang (lokal überschrieben).</p>
+            Die Nodes erhalten sie in <span class="mono">/var/lib/mailrunner/secrets/common.env</span> (nicht in der secrets.env).
+            Ein Wert in <span class="mono">/etc/mailrunner/secrets.env</span> einer Node hat dort Vorrang.</p>
         <?php foreach ($keys as $k => [$label, $hint]): $s = $secrets[$k]; ?>
         <div class="mb-3">
             <label class="form-label d-flex align-items-center"><?= esc($label) ?> <span class="mono small text-secondary ms-2"><?= esc($k) ?></span>
-                <?= $s['set'] ? '<span class="badge bg-green-lt ms-auto">gesetzt</span>' : '<span class="badge bg-secondary-lt ms-auto">nicht gesetzt</span>' ?></label>
+                <?= $s['set'] ? '<span class="mono small ms-auto me-2" title="erste und letzte zwei Zeichen">' . esc($hints[$k] ?? '') . '</span><span class="badge bg-green-lt">gesetzt</span>' : '<span class="badge bg-secondary-lt ms-auto">nicht gesetzt</span>' ?></label>
             <input type="password" name="value[<?= esc($k, 'attr') ?>]" class="form-control mono" autocomplete="new-password" <?= can_write() ? '' : 'disabled' ?>
                 placeholder="<?= $s['set'] ? '•••••••• (neuen Wert eingeben zum Ersetzen)' : 'Wert eingeben' ?>">
             <div class="form-hint d-flex"><span><?= esc($hint) ?><?= $s['set'] ? ' · geändert ' . dt($s['updated_at']) . ($s['updated_by'] ? ' von ' . esc($s['updated_by']) : '') : '' ?></span>
@@ -39,8 +40,12 @@
             <?php if (is_array($ns)): ?>
                 <?php if (! empty($ns['push_error'])): ?><div class="small text-danger"><?= esc($ns['push_error']) ?></div><?php endif ?>
                 <?php if (($ns['pending_revision'] ?? null) === $revision && $revision !== null): ?><div class="small">an der Node: <code>sudo mailrunner mr:config:apply</code></div><?php endif ?>
-                <?php if (! empty($ns['local_overrides'])): ?><div class="small text-secondary">lokal überschrieben: <span class="mono"><?= esc(implode(', ', $ns['local_overrides'])) ?></span></div><?php endif ?>
-                <?php $onlyLocal = array_diff($ns['local'] ?? [], $ns['local_overrides'] ?? []); if ($onlyLocal !== []): ?><div class="small text-secondary">nur lokal: <span class="mono"><?= esc(implode(', ', $onlyLocal)) ?></span></div><?php endif ?>
+                <?php $same = $ns['local_same'] ?? []; $over = $ns['local_overrides'] ?? []; $onlyLocal = array_values(array_diff($ns['local'] ?? [], $over, $same, $ns['common'] ?? []));
+                    $central = array_values(array_diff($ns['common'] ?? [], $over, $same)); ?>
+                <?php if ($central !== []): ?><div class="small text-secondary">zentral: <span class="mono"><?= esc(implode(', ', $central)) ?></span></div><?php endif ?>
+                <?php if ($same !== []): ?><div class="small text-secondary">lokal, gleicher Wert wie zentral: <span class="mono"><?= esc(implode(', ', $same)) ?></span></div><?php endif ?>
+                <?php if ($over !== []): ?><div class="small text-warning">lokal abweichend (hat Vorrang): <span class="mono"><?= esc(implode(', ', $over)) ?></span></div><?php endif ?>
+                <?php if ($onlyLocal !== []): ?><div class="small text-secondary">nur lokal: <span class="mono"><?= esc(implode(', ', $onlyLocal)) ?></span></div><?php endif ?>
             <?php endif ?>
         </div>
     <?php endforeach ?>
