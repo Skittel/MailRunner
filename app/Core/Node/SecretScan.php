@@ -69,7 +69,7 @@ class SecretScan
                 $value         = trim($value, "'\"");
                 if (strlen($value) >= self::MIN_LENGTH && preg_match(self::NOT_SECRET, $key) !== 1
                     && ! str_starts_with($value, '/') && ! str_starts_with($value, 'http')) {
-                    $values[$value] = basename($file) . ':' . $key;
+                    $values[$value] ??= basename($file) . ':' . $key; // first name wins (local secrets.env before common.env)
                 }
             }
         }
@@ -170,7 +170,7 @@ class SecretScan
         $findings = array_values($unique);
         $accepted = $this->accepted();
         foreach ($findings as &$f) {
-            $a             = $accepted[$f['secret'] . "\0" . $f['where'] . "\0" . $f['fp']] ?? null;
+            $a             = $accepted[$f['where'] . "\0" . $f['fp']] ?? null; // by value fingerprint: the same value under another name stays accepted
             $f['accepted'] = $a !== null && $f['count'] <= $a;
         }
         unset($f);
@@ -221,13 +221,13 @@ class SecretScan
         return count($rows);
     }
 
-    /** @return array<string, int> "secret\0where\0fp" => accepted count */
+    /** @return array<string, int> "where\0fp" => accepted count */
     private function accepted(): array
     {
         $rows = $this->acceptFile !== null && is_readable($this->acceptFile) ? json_decode((string) file_get_contents($this->acceptFile), true) : [];
         $map  = [];
         foreach (is_array($rows) ? $rows : [] as $a) {
-            $map[($a['secret'] ?? '') . "\0" . ($a['where'] ?? '') . "\0" . ($a['fp'] ?? '')] = (int) ($a['count'] ?? 0);
+            $map[($a['where'] ?? '') . "\0" . ($a['fp'] ?? '')] = (int) ($a['count'] ?? 0);
         }
 
         return $map;

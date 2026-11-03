@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.21 - 2026-11-03
+- Secret scan: accepted findings match by place and value fingerprint, no longer by the file name; the same value
+  in secrets.env and common.env no longer re-opens an accepted finding. Findings name the local file first.
+
 ## 0.1.20 - 2026-11-03
 - Automatic updates (mailrunner-update.service) failed on every node: systemd sets no HOME and composer refused
   to run. install.sh / install-admin.sh set HOME and COMPOSER_HOME themselves; the unit sets HOME=/root.
