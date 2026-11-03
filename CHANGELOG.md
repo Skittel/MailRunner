@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.17 - 2026-11-03
+- install.sh and `mr:update` take a lock (`/run/lock/mailrunner-install.lock`, `/run/lock/mailrunner-update.lock`):
+  two parallel updates restarted milter/unbound under each other's self test (454 "Try again later").
+- Self test: API answers that are no JSON object (e.g. during a php-fpm restart) count as empty answers;
+  a crash of the self test names file:line in the error.
+
 ## 0.1.16 - 2026-11-03
 - Self test summary shows skipped checks (count and names, e.g. checks without a key in `secrets.env`);
   journal `node.selftest` has `skipped`.

@@ -40,6 +40,8 @@ log() { echo "==> $*"; }
 render() { sed -e "s/{{HOSTNAME}}/${HOST}/g" -e "s/{{CERT_NAMES}}/${CERT_NAMES:-$HOST}/g" "$1"; }
 
 [[ $EUID -eq 0 ]] || die "run as root"
+exec 9>/run/lock/mailrunner-install.lock
+flock -n 9 || die "another MailRunner installation or update is running (lock /run/lock/mailrunner-install.lock)"
 if [[ -n "$ENROLL_TOKEN" ]]; then
     [[ "$ADMIN_URL" =~ ^https://[a-z0-9.-]+(:[0-9]+)?$ ]] || die "--enroll-token needs --admin-url=https://<admin host>"
     [[ "$ENROLL_TOKEN" =~ ^[A-Za-z0-9_-]{20,80}$ ]] || die "--enroll-token: invalid format"

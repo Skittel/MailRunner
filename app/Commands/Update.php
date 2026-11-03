@@ -37,6 +37,12 @@ class Update extends MrCommand
 
             return null;
         }
+        $lock = fopen('/run/lock/mailrunner-update.lock', 'c');
+        if ($lock === false || ! flock($lock, LOCK_EX | LOCK_NB)) {
+            CLI::error('Another mr:update is running (lock /run/lock/mailrunner-update.lock)');
+
+            return 1;
+        }
         $plan = $updater->plan($this->optionString('version'), ! $fromAdmin && $this->flag('allow-downgrade'), ! $fromAdmin && $this->flag('force'));
         CLI::write(sprintf('Installed: %s   Target: %s   Source: %s', $plan['current'], $plan['target'] ?? '-', $plan['source']));
         if ($plan['files'] !== '') {

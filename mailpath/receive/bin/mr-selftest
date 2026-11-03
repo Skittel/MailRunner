@@ -22,7 +22,9 @@ def main():
         analyzer.use_node_resolver()
         result = selftest.run_all(args["hostname"], int(args.get("journal-after", "0")), "base-only" in args, args.get("mx-names", ""))
     except Exception as e:
-        print(json.dumps({"status": "error", "error": f"{e.__class__.__name__}: {e}"}))
+        import traceback
+        where = traceback.extract_tb(e.__traceback__)[-1]  # file:line for the diagnosis (no values)
+        print(json.dumps({"status": "error", "error": f"{e.__class__.__name__}: {e} ({os.path.basename(where.filename)}:{where.lineno})"}))
         return 2
     print(json.dumps(result, ensure_ascii=False))
     return 0 if result["status"] == "pass" else 1

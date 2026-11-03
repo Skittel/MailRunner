@@ -479,11 +479,17 @@ class Api:
         req = urllib.request.Request(self.base + path, data=data, method="POST" if body is not None else "GET",
                                      headers={"Authorization": f"Bearer {token or self.token}",
                                               "Content-Type": "application/json"})
+        def obj(raw):  # API answers are JSON objects; anything else (e.g. a proxy page during a restart) -> {}
+            try:
+                body = json.loads(raw or b"{}")
+            except ValueError:
+                return {}
+            return body if isinstance(body, dict) else {}
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
-                return resp.status, json.loads(resp.read() or b"{}")
+                return resp.status, obj(resp.read())
         except urllib.error.HTTPError as e:
-            return e.code, json.loads(e.read() or b"{}")
+            return e.code, obj(e.read())
 
 
 def api_checks(run, items, times, subject, journal_after):
@@ -500,7 +506,7 @@ def api_checks(run, items, times, subject, journal_after):
     while time.monotonic() - t0 < 60 and len(found) < len(expected):
         status, body = api.call("messages?acked=0&include=content&limit=100")
         if status != 200:
-            run.add("api", "api.collect", "fail", f"HTTP {status} {body.get('error', {}).get('code', '')}")
+            run.add("api", "api.collect", "fail", f"HTTP {status} {err.get('code', '') if isinstance(err := body.get('error'), dict) else (err or '')}")
             return
         for m in body.get("data", []):
             key = (m.get("header") or {}).get("subject")
