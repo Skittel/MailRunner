@@ -41,7 +41,7 @@ abstract class AdminController extends BaseController
         $id = (new \App\Core\Admin\PendingChanges())->queue($kind, $ref, $body, (string) ($this->ctx()->actor ?? "admin"));
 
         return ApiResponse::ok(['pending' => true, 'pending_id' => $id,
-            'message' => 'Queued: this node applies admin configuration only after approval (mr:config:apply)'], 202);
+            'message' => 'Queued: this node applies admin configuration only after approval (sudo mailrunner mr:config:apply)'], 202);
     }
 
     /**

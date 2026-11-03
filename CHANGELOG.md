@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.13 - 2026-11-03
+- Command hints shown to people are complete and copyable: `sudo mailrunner mr:...` (admin node card,
+  node API messages for manual configuration, node key / Postfix reload / role mail hints).
+
 ## 0.1.12 - 2026-11-03
 - Admin enrollment form: an MX name without "=4|6|46" is accepted and stored as "=46" (IPv4 and IPv6),
   as the self test and the DNS check already treated it.

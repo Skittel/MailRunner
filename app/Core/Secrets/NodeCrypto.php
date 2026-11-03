@@ -31,7 +31,7 @@ class NodeCrypto
     public static function fromFile(string $path): self
     {
         if (! is_readable($path)) {
-            throw new RuntimeException('Node key not readable: ' . $path . ' (run spark mr:node:init)');
+            throw new RuntimeException('Node key not readable: ' . $path . ' (run: sudo mailrunner mr:node:init)');
         }
         $key = base64_decode(trim((string) file_get_contents($path)), true);
         if ($key === false) {

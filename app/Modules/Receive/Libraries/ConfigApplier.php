@@ -89,7 +89,7 @@ class ConfigApplier
             return [false, 'Postfix not installed, no reload'];
         }
         if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
-            return [false, 'Not root: Postfix not reloaded (run "sudo spark mr:apply" or "postfix reload")'];
+            return [false, 'Not root: Postfix not reloaded (run "sudo mailrunner mr:apply" or "sudo postfix reload")'];
         }
         exec('/usr/sbin/postfix check 2>&1', $out, $code);
         if ($code !== 0) {

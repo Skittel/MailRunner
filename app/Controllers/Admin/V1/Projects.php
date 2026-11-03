@@ -67,7 +67,7 @@ class Projects extends AdminController
     public function createToken(string $customer, string $project)
     {
         if ($this->configManual()) {
-            return ApiResponse::error(409, 'CONFIG_MANUAL', 'This node applies admin configuration only after approval; create tokens on the node: mr:token:create');
+            return ApiResponse::error(409, 'CONFIG_MANUAL', 'This node applies admin configuration only after approval; create tokens on the node: sudo mailrunner mr:token:create <customer/project>');
         }
 
         return $this->guard(function () use ($customer, $project) {

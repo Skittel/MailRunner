@@ -50,7 +50,7 @@ class RoleMailShow extends MrCommand
             CLI::write(sprintf('%-12s %s', $k, is_scalar($v) ? (string) $v : json_encode($v)));
         }
         CLI::newLine();
-        CLI::write('Original: mr:rolemail:show ' . $data['message_id'] . ' --raw', 'yellow');
+        CLI::write('Original: sudo mailrunner mr:rolemail:show ' . $data['message_id'] . ' --raw', 'yellow');
 
         return null;
     }
