@@ -5,6 +5,8 @@ Groups:
            reachability of the external APIs (no quota), local test zone
   mx       every MX name of the node (MAILRUNNER_MX_NAMES, e.g. "mx.example=46 mx4.example=4"): address
            families exactly as configured, all addresses on this node, STARTTLS + certificate per family;
+           mx.ipv6_route: with an AAAA record the node needs a working IPv6 route to the outside (a local
+           connection to the own address passes even without one, senders then get "no route to host");
            route domains whose MX does not point to this node (warning)
   smtp     delivery over the node's public IPv4/IPv6 on port 25: STARTTLS, certificate (name, >= 14 days),
            rejections (recipient pattern, no open relay), postmaster accepted, time until 250
@@ -441,6 +443,51 @@ def mx_checks(run, spec):
                         (time.monotonic() - t0) * 1000)
 
 
+# Public IPv6 addresses of root servers (a, k, l): stable, answer over UDP 53 without a key.
+ROOT_V6 = ["2001:503:ba3e::2:30", "2001:7fd::1", "2001:500:9f::42"]
+
+
+def ipv6_route_check(run, spec):
+    """mx.ipv6_route: if an MX name of the node has an AAAA record, the node must reach the outside over IPv6
+    (default route + answer of a root server). Details name no node address."""
+    names = parse_mx_names(spec, run.hostname)
+    with_v6 = [n for n, fams in names.items() if (fams is None or 6 in fams) and own_addresses(n).get(6)]
+
+    def check():
+        return ipv6_route_status(with_v6)
+    run.check("mx", "mx.ipv6_route", check)
+
+
+def ipv6_route_status(with_v6, roots=None, query=None):
+    if not with_v6:
+        return "skip", "no AAAA record"
+    roots = roots or ROOT_V6
+    try:
+        s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+        try:
+            s.connect((roots[0], 53))   # UDP connect only selects the route, sends nothing
+        finally:
+            s.close()
+    except OSError as e:
+        return "fail", (f"AAAA published for {', '.join(with_v6)} but no IPv6 route to the outside "
+                        f"({e.strerror or e}); senders cannot reach the node over IPv6")
+    if query is None:
+        import dns.message
+        import dns.query
+
+        def query(ip):
+            dns.query.udp(dns.message.make_query(".", "NS"), ip, timeout=3)
+    errors = []
+    for ip in roots:
+        try:
+            query(ip)
+            return "ok", f"IPv6 route works (root server answered), AAAA for {', '.join(with_v6)}"
+        except Exception as e:
+            errors.append(e.__class__.__name__)
+    return "fail", (f"AAAA published for {', '.join(with_v6)} but no answer over IPv6 from {len(roots)} root servers "
+                    f"({', '.join(sorted(set(errors)))}); check the IPv6 gateway and firewall")
+
+
 def route_mx_checks(run):
     """Warn about route domains whose MX does not point to this node (mail would not arrive here)."""
     from . import analyzer
@@ -605,6 +652,7 @@ def api_checks(run, items, times, subject, journal_after):
 def run_all(hostname, journal_after=0, skip_mail=False, mx_names=""):
     run = Run(hostname)
     zone_ok = base_checks(run)
+    ipv6_route_check(run, mx_names)
     if zone_ok:
         mx_checks(run, mx_names)
     route_mx_checks(run)
