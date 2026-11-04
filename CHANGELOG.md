@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.25 - 2026-11-04
+- Admin settings: the secret hint is shown only in the input field (no longer twice).
+
 ## 0.1.24 - 2026-11-04
 - Admin settings: the input field of a stored secret shows "gespeichert: ab…yz (n Zeichen)" instead of
   asterisks; the label shows the same hint more visibly.

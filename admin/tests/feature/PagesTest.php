@@ -292,7 +292,7 @@ final class PagesTest extends CIUnitTestCase
         $this->assertMatchesRegularExpression('/^[0-9a-z]{4}-[0-9a-z]{4}$/', (string) $rev);
         $page = $this->withSession($this->admin)->get('settings');
         $page->assertSee('gesetzt');
-        $page->assertSee('dq…23 (20 Zeichen)');
+        $this->assertSame(1, substr_count((string) $page->getBody(), 'dq…23 (20 Zeichen)')); // only in the input field
         $page->assertSee('gespeichert: dq…23 (20 Zeichen) – neuen Wert eingeben zum Ersetzen', null, false);
         $page->assertDontSee('••••••••');
         $page->assertDontSee('dqs-secret-value-123');

@@ -13,7 +13,7 @@
         <?php foreach ($keys as $k => [$label, $hint]): $s = $secrets[$k]; ?>
         <div class="mb-3">
             <label class="form-label d-flex align-items-center"><?= esc($label) ?> <span class="mono small text-secondary ms-2"><?= esc($k) ?></span>
-                <?= $s['set'] ? '<code class="ms-auto me-2" title="erste und letzte zwei Zeichen des gespeicherten Werts">' . esc($hints[$k] ?? '?') . '</code><span class="badge bg-green-lt">gesetzt</span>' : '<span class="badge bg-secondary-lt ms-auto">nicht gesetzt</span>' ?></label>
+                <?= $s['set'] ? '<span class="badge bg-green-lt ms-auto">gesetzt</span>' : '<span class="badge bg-secondary-lt ms-auto">nicht gesetzt</span>' ?></label>
             <input type="password" name="value[<?= esc($k, 'attr') ?>]" class="form-control mono" autocomplete="new-password" <?= can_write() ? '' : 'disabled' ?>
                 placeholder="<?= $s['set'] ? esc('gespeichert: ' . ($hints[$k] ?? '?') . ' – neuen Wert eingeben zum Ersetzen', 'attr') : 'Wert eingeben' ?>">
             <div class="form-hint d-flex"><span><?= esc($hint) ?><?= $s['set'] ? ' · geändert ' . dt($s['updated_at']) . ($s['updated_by'] ? ' von ' . esc($s['updated_by']) : '') : '' ?></span>
