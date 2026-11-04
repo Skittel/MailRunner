@@ -115,6 +115,59 @@ final class AdminApiTest extends CIUnitTestCase
         $this->assertGreaterThan(0, $rev);
     }
 
+    public function testCentralTokensKeepExistingBearerAndSyncEverywhere(): void
+    {
+        $this->api('put', 'admin/v1/customers/acme', ['name' => 'ACME']);
+        $this->api('put', 'admin/v1/projects/acme/inbox', ['profile' => 'analysis', 'routes' => ['in.example.org']]);
+        [, $b]  = $this->api('post', 'admin/v1/projects/acme/inbox/tokens', ['label' => 'App']); // existing local token
+        $bearer = $b['data']['bearer'];
+        $id     = $b['data']['token_id'];
+
+        // the admin reads the hash once (import) ...
+        [, $show] = $this->api('get', 'admin/v1/projects/acme/inbox');
+        $hash     = $show['data']['tokens'][0]['secret_hash'];
+        $this->assertSame(hash('sha256', explode('.', $bearer)[1]), $hash);
+        $this->assertFalse($show['data']['tokens_central']);
+
+        // ... and sends the full set: imported token + a new central one; a local extra token is revoked
+        $local   = service('apiTokenService')->create('acme/inbox', 'local', null, new ChangeContext('cli', 'phpunit', true));
+        $secret2 = str_repeat('B', 43);
+        $set     = [['token_id' => $id, 'label' => 'App', 'secret_hash' => $hash, 'created_at' => '2026-11-01T10:00:00.000000Z'],
+            ['token_id' => 'mrt_' . str_repeat('a', 16), 'label' => 'Second', 'secret_hash' => hash('sha256', $secret2), 'expires_at' => null]];
+        [$s, $r] = $this->api('put', 'admin/v1/projects/acme/inbox', ['routes' => ['in.example.org'], 'tokens' => $set]);
+        $this->assertSame(200, $s, json_encode($r));
+        $svc = service('apiTokenService');
+        $this->assertNotNull($svc->authenticate($bearer));                                  // existing token keeps working
+        $this->assertNotNull($svc->authenticate('mrt_' . str_repeat('a', 16) . '.' . $secret2)); // central token works
+        $this->assertNull($svc->authenticate($local['bearer']));                             // not in the admin set: revoked
+        $this->seeInDatabase('journal', ['event' => 'token.synced']);
+
+        // same set again: no change; local create is refused now, a local emergency revoke sticks
+        $journal = $this->db->table('journal')->countAllResults();
+        $this->api('put', 'admin/v1/projects/acme/inbox', ['routes' => ['in.example.org'], 'tokens' => $set]);
+        $this->assertSame($journal, $this->db->table('journal')->countAllResults());
+        [$s, $b] = $this->api('post', 'admin/v1/projects/acme/inbox/tokens', ['label' => 'x']);
+        $this->assertSame([422, 'TOKENS_CENTRAL'], [$s, $b['error']['code'] ?? null], json_encode($b));
+        $svc->revoke($id, new ChangeContext('cli', 'phpunit', true));
+        $this->api('put', 'admin/v1/projects/acme/inbox', ['routes' => ['in.example.org'], 'tokens' => $set]);
+        $this->assertNull($svc->authenticate($bearer));
+
+        // preview (manual mode) names token ids, never hashes
+        $preview = (new \App\Core\Admin\AdminChanges())->preview('project', 'acme/inbox', ['tokens' => [...$set,
+            ['token_id' => 'mrt_' . str_repeat('c', 16), 'label' => 'Third', 'secret_hash' => str_repeat('e', 64)]]]);
+        $this->assertSame([null, 'Third'], $preview['token mrt_' . str_repeat('c', 16)]);
+        $this->assertStringNotContainsString($hash, json_encode($preview));
+
+        [$s, $b] = $this->api('put', 'admin/v1/projects/acme/inbox', ['tokens' => [['token_id' => 'bad', 'secret_hash' => 'x']]]);
+        $this->assertSame([422, 'INVALID_TOKEN'], [$s, $b['error']['code']]);
+
+        // self test projects keep their local tokens
+        $this->api('put', 'admin/v1/customers/system', ['name' => 'Node system']);
+        $this->api('put', 'admin/v1/projects/system/selftest', ['profile' => 'analysis']);
+        [$s, $b] = $this->api('put', 'admin/v1/projects/system/selftest', ['tokens' => []]);
+        $this->assertSame([422, 'TOKENS_LOCAL'], [$s, $b['error']['code']]);
+    }
+
     public function testAdminTakesOverCliProject(): void
     {
         $cli = new ChangeContext('cli', 'phpunit');

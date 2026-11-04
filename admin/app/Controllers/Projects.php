@@ -7,6 +7,7 @@ use App\Libraries\PublicId;
 use App\Libraries\Audit;
 use App\Libraries\Clock;
 use App\Libraries\Sync;
+use App\Libraries\Tokens;
 use Throwable;
 
 /** Projects of a customer on a node: desired configuration here, pushed to the node on every save. */
@@ -71,6 +72,9 @@ class Projects extends BaseController
         if ($p['move_from_node_id'] !== null || $target === 0 || $target === (int) $p['node_id']) {
             return redirect()->to(site_url('projects/' . $pid))->with('error', 'Bitte eine andere Node wählen (kein Umzug aktiv).');
         }
+        if (! $this->sync()->ensureTokens($id)) { // tokens must be central before the move: same bearer on both nodes
+            return redirect()->to(site_url('projects/' . $pid))->with('error', 'Umzug nicht gestartet: Die Tokens der bisherigen Node konnten nicht übernommen werden (Node nicht erreichbar oder zu alt).');
+        }
         $db = db_connect();
         $db->table('projects')->where('id', $id)->update(['node_id' => $target, 'move_from_node_id' => $p['node_id'], 'changed_at' => Clock::now()]);
         $err = $this->sync()->pushProject($id);
@@ -132,7 +136,7 @@ class Projects extends BaseController
         }
         db_connect()->table('projects')->where('id', $id)->update($row + ['changed_at' => Clock::now()]);
         Audit::log('project.updated', $p['customer_key'] . '/' . $p['project_key']);
-        $err = $this->sync()->pushProject($id);
+        $err = $this->sync()->pushEverywhere($id);
 
         return redirect()->to(site_url('projects/' . self::pid('projects', $id)))->with($err === null ? 'ok' : 'error', $err === null ? 'Gespeichert und übertragen.' : 'Gespeichert, Übertragung fehlgeschlagen: ' . $err);
     }
@@ -141,58 +145,71 @@ class Projects extends BaseController
     {
         $id = PublicId::id('projects', $pid);
         $p   = $this->find($id);
-        $err = $this->sync()->pushProject($id);
+        $err = $this->sync()->pushEverywhere($id);
         Audit::log('project.pushed', $p['customer_key'] . '/' . $p['project_key'], ['error' => $err]);
 
         return redirect()->to(site_url('projects/' . self::pid('projects', $id)))->with($err === null ? 'ok' : 'error', $err === null ? 'Übertragen.' : 'Übertragung fehlgeschlagen: ' . $err);
     }
 
-    /** htmx partial: API tokens of the project (live from the node). */
+    /** htmx partial: API tokens of the project (kept here, last use read live from the project's nodes). */
     public function tokens(string $pid)
     {
         $id = PublicId::id('projects', $pid);
-        $p = $this->find($id);
-        try {
-            $data = $this->sync()->client($this->node($p))->ok('GET', 'projects/' . $p['customer_key'] . '/' . $p['project_key'])['data'];
-        } catch (Throwable $e) {
-            return '<div class="alert alert-warning">Tokens nicht abrufbar: ' . esc($e->getMessage()) . '</div>';
-        }
 
-        return view('projects/_tokens', ['project' => $p, 'tokens' => $data['tokens'], 'created' => null]);
+        return $this->tokensView($this->find($id), null, null);
     }
 
     public function createToken(string $pid)
     {
         $id = PublicId::id('projects', $pid);
-        $p     = $this->find($id);
-        $label = trim((string) $this->request->getPost('label'));
-        $days  = (int) $this->request->getPost('expires_days');
+        $p  = $this->find($id);
+        if ($p['customer_key'] === Tokens::LOCAL_CUSTOMER) {
+            return '<div class="alert alert-warning">Self-Test-Projekte haben lokale Tokens auf jeder Node (install.sh).</div>';
+        }
+        if (! $this->sync()->ensureTokens($id)) {
+            return '<div class="alert alert-danger">Token nicht angelegt: Die Node des Projekts ist nicht erreichbar oder zu alt für zentrale Tokens.</div>';
+        }
         try {
-            $client  = $this->sync()->client($this->node($p));
-            $created = $client->ok('POST', 'projects/' . $p['customer_key'] . '/' . $p['project_key'] . '/tokens', ['label' => $label, 'expires_days' => $days ?: null])['data'];
-            $tokens  = $client->ok('GET', 'projects/' . $p['customer_key'] . '/' . $p['project_key'])['data']['tokens'];
+            $days    = (int) $this->request->getPost('expires_days');
+            $created = (new Tokens())->create($id, (string) $this->request->getPost('label'), $days ?: null, session('user_id'));
         } catch (Throwable $e) {
             return '<div class="alert alert-danger">Token nicht angelegt: ' . esc($e->getMessage()) . '</div>';
         }
-        Audit::log('token.created', $p['customer_key'] . '/' . $p['project_key'], ['token_id' => $created['token_id'], 'label' => $label]);
+        Audit::log('token.created', $p['customer_key'] . '/' . $p['project_key'], ['token_id' => $created['token_id']]);
 
-        return view('projects/_tokens', ['project' => $p, 'tokens' => $tokens, 'created' => $created]);
+        return $this->tokensView($p, $created, $this->sync()->pushEverywhere($id));
     }
 
     public function revokeToken(string $pid, string $tokenId)
     {
         $id = PublicId::id('projects', $pid);
-        $p = $this->find($id);
-        try {
-            $client = $this->sync()->client($this->node($p));
-            $client->ok('DELETE', 'tokens/' . rawurlencode($tokenId));
-            $tokens = $client->ok('GET', 'projects/' . $p['customer_key'] . '/' . $p['project_key'])['data']['tokens'];
-        } catch (Throwable $e) {
-            return '<div class="alert alert-danger">Widerruf fehlgeschlagen: ' . esc($e->getMessage()) . '</div>';
+        $p  = $this->find($id);
+        if (! (new Tokens())->revoke($id, $tokenId)) {
+            return $this->tokensView($p, null, 'Token unbekannt oder schon gesperrt.');
         }
         Audit::log('token.revoked', $p['customer_key'] . '/' . $p['project_key'], ['token_id' => $tokenId]);
 
-        return view('projects/_tokens', ['project' => $p, 'tokens' => $tokens, 'created' => null]);
+        return $this->tokensView($p, null, $this->sync()->pushEverywhere($id));
+    }
+
+    /** @param array<string, mixed>|null $created */
+    private function tokensView(array $p, ?array $created, ?string $error)
+    {
+        $local    = $p['customer_key'] === Tokens::LOCAL_CUSTOMER;
+        $tokens   = $local ? array_map(static fn ($t) => $t + ['origin' => 'local'], array_reverse($this->sync()->projectOnNode((int) $p['id'], (int) $p['node_id'])['tokens'] ?? []))
+            : (new Tokens())->list((int) $p['id']);
+        $lastUsed = [];
+        $nodeIds  = array_filter([(int) $p['node_id'], (int) ($p['move_from_node_id'] ?? 0)]);
+        foreach ($nodeIds as $nid) {
+            foreach ($this->sync()->projectOnNode((int) $p['id'], $nid)['tokens'] ?? [] as $t) {
+                if ($t['last_used_at'] !== null && ($lastUsed[$t['token_id']] ?? '') < $t['last_used_at']) {
+                    $lastUsed[$t['token_id']] = $t['last_used_at'];
+                }
+            }
+        }
+
+        return view('projects/_tokens', ['project' => $p, 'tokens' => $tokens, 'lastUsed' => $lastUsed, 'created' => $created,
+            'error' => $error, 'imported' => $local || $p['tokens_imported_at'] !== null, 'local' => $local]);
     }
 
     /**

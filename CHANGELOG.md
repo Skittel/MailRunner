@@ -2,6 +2,13 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
+## 0.1.29 - 2026-11-04
+- Central API tokens: `PUT /admin/v1/projects/...` takes an optional `tokens` list (full set, hashes only). Unknown
+  tokens are added, missing ones revoked; a local revocation is kept. Afterwards local token create/rotate is
+  refused for the project (`TOKENS_CENTRAL`). `GET /admin/v1/projects/...` reports `secret_hash` and
+  `tokens_central` (one-time import by the admin). Self test projects (`system/…`) stay local.
+- Migration: `projects.tokens_central`.
+
 ## 0.1.28 - 2026-11-04
 - Self test: new check `mx.ipv6_route`. With an AAAA record the node must reach the outside over IPv6
   (route + answer of a root server); a node with a published but unroutable IPv6 address passed all checks before,

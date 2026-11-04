@@ -48,6 +48,12 @@ php spark mr:project:show acme/inbox
 
 Run `php spark list` for all `mr:` commands.
 
+With MailRunner Admin, API tokens are managed centrally: the admin creates them (secret shown once, only the
+SHA-256 is stored) and pushes the token set with the project to every node of the project, so one bearer works on
+all of them (project move, several API nodes). Tokens that existed on a node are taken over once with their hash
+and stay valid. Local `mr:token:create`/`rotate` are refused for such projects; `mr:token:revoke --force` stays
+possible as an emergency stop and is not undone by the admin. The self test projects (`system/…`) keep local tokens.
+
 ## Versioning
 
 `n.n.n`, each part 0-999. Node and admin are versioned separately:

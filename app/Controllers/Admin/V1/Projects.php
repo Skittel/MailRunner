@@ -9,10 +9,12 @@ use App\Core\Support\Time;
 
 /**
  * GET    /admin/v1/projects
- * GET    /admin/v1/projects/{customer}/{project}          incl. routes and tokens (without secrets)
+ * GET    /admin/v1/projects/{customer}/{project}          incl. routes and tokens (hash, never the secret)
  * PUT    /admin/v1/projects/{customer}/{project}          complete configuration, idempotent:
  *        {"profile": "analysis", "name": "...", "enabled": true, "routes": ["example.org", ...],
- *         "settings": {"recipient_pattern": ..., "journal_scope": ..., "role_mail": ..., ...}}
+ *         "settings": {"recipient_pattern": ..., "journal_scope": ..., "role_mail": ..., ...},
+ *         "tokens": [{"token_id", "label", "secret_hash", "created_at", "expires_at", "revoked_at"}, ...]}
+ *        "tokens" (optional) is the full central token set of the project: see ApiTokenService::sync()
  * POST   /admin/v1/projects/{customer}/{project}/tokens   {"label": "...", "expires_days": 90} -> secret once
  * DELETE /admin/v1/tokens/{token_id}
  */
@@ -37,15 +39,17 @@ class Projects extends AdminController
             $ref = $customer . '/' . $project;
             $p   = service('projectService')->get($ref);
 
+            $hashes  = array_column(db_connect()->table('api_tokens')->select('token_id, secret_hash')->where('project_id', $p['id'])->get()->getResultArray(), 'secret_hash', 'token_id');
             $unacked = db_connect()->table('receive_messages')->where('project_id', $p['id'])->where('acked_at', null)->where('content_deleted_at', null)->countAllResults();
 
             return ApiResponse::ok(['data' => self::present($p, array_column(service('routeService')->list($ref), 'route')) + [
                 'messages_unacked' => $unacked,
+                'tokens_central' => (int) ($p['tokens_central'] ?? 0) === 1,
                 'tokens' => array_map(static fn ($t) => [
-                    'token_id' => $t['token_id'], 'label' => $t['label'], 'created_at' => Time::toIso($t['created_at']),
+                    'token_id' => $t['token_id'], 'label' => $t['label'], 'secret_hash' => $hashes[$t['token_id']] ?? null, 'created_at' => Time::toIso($t['created_at']),
                     'expires_at' => Time::toIso($t['expires_at']), 'revoked_at' => Time::toIso($t['revoked_at']),
                     'last_used_at' => Time::toIso($t['last_used_at']),
-                ], service('apiTokenService')->list($ref)),
+                ], service('apiTokenService')->list($ref)), // secret_hash only here (mTLS admin API): central token import
             ]]);
         });
     }

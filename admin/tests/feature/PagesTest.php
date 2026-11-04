@@ -248,7 +248,12 @@ final class PagesTest extends CIUnitTestCase
         $this->db->table('nodes')->insert(['public_id' => 'n0de-0002', 'node_key' => 'node2.eu', 'name' => 'Node 2', 'base_url' => 'https://node2.invalid',
             'enabled' => 1, 'created_at' => $now, 'updated_at' => $now]);
         $this->withSession($this->admin)->get('projects/pr0j-0001')->assertSee('Auf andere Node umziehen');
-        // the new node is unreachable in tests: the move is not started and nothing changes
+        // tokens of the old node not taken over yet (unreachable in tests): no move
+        $this->postAs('projects/pr0j-0001/move', ['node_id' => 'n0de-0002'])->assertRedirect();
+        $this->seeInDatabase('projects', ['public_id' => 'pr0j-0001', 'node_id' => 1, 'move_from_node_id' => null]);
+        $this->dontSeeInDatabase('audit_log', ['action' => 'project.move_failed']);
+        // tokens central, but the new node is unreachable: the move is not started and nothing changes
+        $this->db->table('projects')->where('id', 1)->update(['tokens_imported_at' => $now]);
         $r = $this->postAs('projects/pr0j-0001/move', ['node_id' => 'n0de-0002']);
         $r->assertRedirect();
         $this->seeInDatabase('projects', ['public_id' => 'pr0j-0001', 'node_id' => 1, 'move_from_node_id' => null]);
@@ -259,6 +264,39 @@ final class PagesTest extends CIUnitTestCase
         $r->assertSee('Umzug von');
         $r->assertSee('Alte Node abschalten');
         $r->assertSee('nicht erreichbar');
+    }
+
+    public function testCentralTokens(): void
+    {
+        // node tokens not taken over yet (node unreachable in tests): no token is created
+        $this->postAs('projects/pr0j-0001/tokens', ['label' => 'App'])->assertSee('nicht erreichbar oder zu alt');
+        $this->assertSame(0, $this->db->table('api_tokens')->countAllResults());
+
+        $tokens = new \App\Libraries\Tokens();
+        $hash   = hash('sha256', str_repeat('S', 43));
+        $this->assertSame(1, $tokens->import(1, [['token_id' => 'mrt_' . str_repeat('a', 16), 'label' => 'Old', 'secret_hash' => $hash,
+            'created_at' => '2026-11-01T10:00:00.000000Z', 'expires_at' => null, 'revoked_at' => null], ['token_id' => 'bad', 'secret_hash' => $hash]]));
+        $this->assertSame(0, $tokens->import(1, [['token_id' => 'mrt_' . str_repeat('a', 16), 'secret_hash' => $hash]])); // once
+        $this->db->table('projects')->where('id', 1)->update(['tokens_imported_at' => '2026-11-04 08:00:00.000000']);
+
+        $r = $this->postAs('projects/pr0j-0001/tokens', ['label' => 'App', 'expires_days' => 30]);
+        $r->assertSee('Token angelegt');
+        $r->assertSee('übernommen');
+        $r->assertSee('Übertragung an die Node'); // push fails in tests, shown
+        preg_match('/value="(mrt_[a-z0-9]{16})\.([A-Za-z0-9_-]{43})"/', (string) $r->getBody(), $m);
+        $this->assertCount(3, $m);
+        $row = $this->db->table('api_tokens')->where('token_id', $m[1])->get()->getRowArray();
+        $this->assertSame(hash('sha256', $m[2]), $row['secret_hash']); // only the hash is stored
+        $this->assertStringNotContainsString($m[2], (string) $this->db->table('audit_log')->select('GROUP_CONCAT(details) AS d')->get()->getRow('d'));
+
+        $push = $tokens->forPush(1);
+        $this->assertSame(['mrt_' . str_repeat('a', 16), $m[1]], array_column($push, 'token_id'));
+        $this->assertSame($hash, $push[0]['secret_hash']);
+        $this->assertSame('2026-11-01T10:00:00.000000Z', $push[0]['created_at']);
+
+        $this->postAs('projects/pr0j-0001/tokens/' . $m[1] . '/revoke', [])->assertSee('ungültig');
+        $this->assertNotNull($this->db->table('api_tokens')->where('token_id', $m[1])->get()->getRow('revoked_at'));
+        $this->withSession(['access' => 'ro'] + $this->admin)->get('projects/pr0j-0001/tokens')->assertSee($m[1]);
     }
 
     public function testAccessFromGroups(): void

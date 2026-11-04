@@ -72,7 +72,7 @@ $this->setVar('pretitle', '<a href="/customers/' . $customer['public_id'] . '">'
         <div class="fw-bold mb-1">Umzug von <span class="mono"><?= esc($moveOld['node']['node_key']) ?></span> läuft</div>
         <ol class="mb-1 ps-3 small">
             <li>DNS: MX der Routen-Domains auf <span class="mono"><?= esc($project['node_key']) ?></span> umstellen (TTL abwarten).</li>
-            <li>Anwendung: API-Adresse <span class="mono"><?= esc($nodeBase) ?></span> und ein neues Token dieser Node (unten) eintragen.</li>
+            <li>Anwendung: API-Adresse auf <span class="mono"><?= esc($nodeBase) ?></span> umstellen. Die Tokens bleiben gleich, sie gelten auf beiden Nodes.</li>
             <li>Alte Node: offene Mails abholen lassen.</li>
             <li>„Alte Node abschalten“.</li>
         </ol>

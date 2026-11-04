@@ -65,6 +65,12 @@ class AdminChanges
                 service('routeService')->set($ref, $wanted, $ctx);
             }
         }
+        if (array_key_exists('tokens', $body)) { // central tokens: the full set of the project (hashes only)
+            if (! is_array($body['tokens'])) {
+                throw new ConfigException('INVALID_TOKEN', 'tokens must be a list');
+            }
+            service('apiTokenService')->sync($ref, array_values($body['tokens']), $ctx);
+        }
 
         return [$projects->get($ref), $created];
     }
@@ -142,7 +148,48 @@ class AdminChanges
                 $diff[$field] = [$now === [] ? null : $old, $value];
             }
         }
+        if ($kind === 'project' && is_array($body['tokens'] ?? null)) { // token ids only, never hashes
+            $diff += self::tokenPreview($ref, $body['tokens']);
+        }
 
         return $diff;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $tokens
+     *
+     * @return array<string, array{0: mixed, 1: mixed}>
+     */
+    private static function tokenPreview(string $ref, array $tokens): array
+    {
+        $p    = service('projectService')->find($ref);
+        $have = [];
+        if ($p !== null) {
+            foreach (db_connect()->table('api_tokens')->select('token_id, label, expires_at, revoked_at')->where('project_id', $p['id'])->get()->getResultArray() as $t) {
+                $have[$t['token_id']] = $t;
+            }
+        }
+        $active = static fn (array $t): bool => ($t['revoked_at'] ?? null) === null;
+        $out    = [];
+        foreach ($tokens as $t) {
+            $id  = (string) ($t['token_id'] ?? '');
+            $cur = $have[$id] ?? null;
+            if ($cur === null) {
+                $out['token ' . $id] = [null, ($t['label'] ?? '') . ($active($t) ? '' : ' (revoked)')];
+            } elseif ($cur['revoked_at'] === null && ! $active($t)) {
+                $out['token ' . $id] = ['active', 'revoked'];
+            }
+            unset($have[$id]);
+        }
+        foreach ($have as $id => $t) {
+            if ($t['revoked_at'] === null) {
+                $out['token ' . $id] = ['active', 'revoked (not in admin)'];
+            }
+        }
+        if ($p !== null && (int) $p['tokens_central'] !== 1) {
+            $out['tokens'] = ['local', 'managed in MailRunner Admin'];
+        }
+
+        return $out;
     }
 }
