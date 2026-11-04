@@ -293,6 +293,8 @@ final class PagesTest extends CIUnitTestCase
         $page = $this->withSession($this->admin)->get('settings');
         $page->assertSee('gesetzt');
         $page->assertSee('dq…23 (20 Zeichen)');
+        $page->assertSee('gespeichert: dq…23 (20 Zeichen) – neuen Wert eingeben zum Ersetzen', null, false);
+        $page->assertDontSee('••••••••');
         $page->assertDontSee('dqs-secret-value-123');
         $this->assertStringNotContainsString('dqs-secret-value-123', (string) $this->db->table('audit_log')->select('details')->get()->getRow('details'));
 

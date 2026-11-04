@@ -7,15 +7,15 @@
     <?= csrf_field() ?>
     <div class="card-header"><h3 class="card-title">Gemeinsame Schlüssel für alle Nodes</h3></div>
     <div class="card-body">
-        <p class="text-secondary small">Werte werden verschlüsselt gespeichert und nie wieder angezeigt. Leeres Feld = unverändert.
+        <p class="text-secondary small">Werte werden verschlüsselt gespeichert; angezeigt werden nur die ersten und letzten zwei Zeichen. Leeres Feld = unverändert.
             Die Nodes erhalten sie in <span class="mono">/var/lib/mailrunner/secrets/common.env</span> (nicht in der secrets.env).
             Ein Wert in <span class="mono">/etc/mailrunner/secrets.env</span> einer Node hat dort Vorrang.</p>
         <?php foreach ($keys as $k => [$label, $hint]): $s = $secrets[$k]; ?>
         <div class="mb-3">
             <label class="form-label d-flex align-items-center"><?= esc($label) ?> <span class="mono small text-secondary ms-2"><?= esc($k) ?></span>
-                <?= $s['set'] ? '<span class="mono small ms-auto me-2" title="erste und letzte zwei Zeichen">' . esc($hints[$k] ?? '') . '</span><span class="badge bg-green-lt">gesetzt</span>' : '<span class="badge bg-secondary-lt ms-auto">nicht gesetzt</span>' ?></label>
+                <?= $s['set'] ? '<code class="ms-auto me-2" title="erste und letzte zwei Zeichen des gespeicherten Werts">' . esc($hints[$k] ?? '?') . '</code><span class="badge bg-green-lt">gesetzt</span>' : '<span class="badge bg-secondary-lt ms-auto">nicht gesetzt</span>' ?></label>
             <input type="password" name="value[<?= esc($k, 'attr') ?>]" class="form-control mono" autocomplete="new-password" <?= can_write() ? '' : 'disabled' ?>
-                placeholder="<?= $s['set'] ? '•••••••• (neuen Wert eingeben zum Ersetzen)' : 'Wert eingeben' ?>">
+                placeholder="<?= $s['set'] ? esc('gespeichert: ' . ($hints[$k] ?? '?') . ' – neuen Wert eingeben zum Ersetzen', 'attr') : 'Wert eingeben' ?>">
             <div class="form-hint d-flex"><span><?= esc($hint) ?><?= $s['set'] ? ' · geändert ' . dt($s['updated_at']) . ($s['updated_by'] ? ' von ' . esc($s['updated_by']) : '') : '' ?></span>
                 <?php if ($s['set'] && can_write()): ?><label class="form-check form-check-inline ms-auto mb-0"><input class="form-check-input" type="checkbox" name="delete[<?= esc($k, 'attr') ?>]" value="1"><span class="form-check-label">löschen</span></label><?php endif ?></div>
         </div>

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.24 - 2026-11-04
+- Admin settings: the input field of a stored secret shows "gespeichert: ab…yz (n Zeichen)" instead of
+  asterisks; the label shows the same hint more visibly.
+
 ## 0.1.23 - 2026-11-03
 - Self test: the Spamhaus DQS check retries SERVFAIL/timeouts up to three times (3, 6, 10 s) instead of once;
   a new node failed twice right after the install, the next run passed.
