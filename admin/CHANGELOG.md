@@ -4,7 +4,7 @@ Admin and node are versioned separately since 0.1.26: `admin/VERSION` with tags 
 `VERSION` with tags `v*` (`CHANGELOG.md` in the repository root). An admin release only offers node updates when
 the node version in the same checkout is newer. Up to 0.1.25 both shared one version: see `../CHANGELOG.md`.
 
-## 0.1.28 - 2026-11-05
+## 0.1.28 - 2026-11-04
 - Project page, card API-Tokens: shows the webhook the customer set over the node API (shortened URL, cooldown,
   last ping with HTTP code or error), per node during a move. Needs node 0.1.30.
 

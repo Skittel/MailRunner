@@ -2,7 +2,7 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
-## 0.1.30 - 2026-11-05
+## 0.1.30 - 2026-11-04
 - Webhooks: `PUT|GET|DELETE /v1/webhook` (customer token) with `url` and `cooldown_seconds` (1-3600, default 2).
   After an import with new mail the project's webhook gets an empty POST (`X-MailRunner-Event: messages`, 5 s,
   no redirects, never repeated); at most one per cooldown, mail during the cooldown gets a ping when it ends.
