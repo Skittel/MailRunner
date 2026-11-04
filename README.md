@@ -50,7 +50,12 @@ Run `php spark list` for all `mr:` commands.
 
 ## Versioning
 
-`n.n.n`, each part 0-999. The current version is in `VERSION`; changes are listed in `CHANGELOG.md`.
+`n.n.n`, each part 0-999. Node and admin are versioned separately:
+
+- node: `VERSION`, tags `v*`, `CHANGELOG.md` (nodes update only to these tags)
+- admin: `admin/VERSION`, tags `admin-v*`, `admin/CHANGELOG.md`
+
+An admin release offers node updates only when the node version in the same checkout is newer than a node's.
 
 ## License
 

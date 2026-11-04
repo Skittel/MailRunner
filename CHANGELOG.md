@@ -1,5 +1,7 @@
 # Changelog
 
+Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
+
 ## 0.1.25 - 2026-11-04
 - Admin settings: the secret hint is shown only in the input field (no longer twice).
 

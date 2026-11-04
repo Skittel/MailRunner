@@ -42,9 +42,25 @@ class Enroll extends BaseController
 
     public const REPO = 'https://github.com/Skittel/MailRunner.git';
 
+    /**
+     * Node version shipped with this admin (root VERSION of the same checkout; release: NODE_VERSION). Enrollment
+     * installs it and automatic updates offer it. Admin and node are versioned separately (admin/VERSION).
+     */
     public static function version(): string
     {
-        foreach ([ROOTPATH . 'VERSION', ROOTPATH . '../VERSION'] as $f) {
+        return self::readVersion([ROOTPATH . 'NODE_VERSION', ROOTPATH . '../VERSION']);
+    }
+
+    /** Version of the admin itself (admin/VERSION, tags admin-v*). */
+    public static function adminVersion(): string
+    {
+        return self::readVersion([ROOTPATH . 'VERSION']);
+    }
+
+    /** @param list<string> $files */
+    private static function readVersion(array $files): string
+    {
+        foreach ($files as $f) {
             if (is_file($f)) {
                 return trim((string) file_get_contents($f));
             }

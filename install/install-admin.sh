@@ -31,7 +31,8 @@ render() { sed -e "s/{{HOSTNAME}}/${HOST}/g" "$1"; }
 [[ "$HOST" =~ ^[a-z0-9.-]+\.[a-z]{2,}$ ]] || die "--hostname is required (FQDN)"
 HAVE_CERT=1
 [[ -f "/etc/letsencrypt/live/$HOST/fullchain.pem" ]] || HAVE_CERT=0
-VERSION="$(tr -d '[:space:]' < "$SOURCE/VERSION")"
+VERSION="$(tr -d '[:space:]' < "$SOURCE/admin/VERSION")"            # admin version (tags admin-v*)
+NODE_VERSION="$(tr -d '[:space:]' < "$SOURCE/VERSION")"            # node version offered to the nodes (tags v*)
 T="$SOURCE/install/templates/admin"
 CONF=/etc/mailrunner-admin
 DATA=/var/lib/mailrunner-admin
@@ -99,7 +100,7 @@ log "Release $VERSION"
 umask 022
 REL="/opt/mailrunner-admin/releases/${VERSION}-$(date -u +%Y%m%d%H%M%S)"
 rsync -a --exclude /vendor --exclude /.env --exclude /writable --exclude /tests --exclude /phpunit.dist.xml "$SOURCE/admin/" "$REL/"
-install -m 0644 "$SOURCE/VERSION" "$REL/VERSION"
+install -m 0644 "$SOURCE/VERSION" "$REL/NODE_VERSION"
 (cd "$REL" && COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --no-interaction --optimize-autoloader -q)
 ln -s "$DATA/writable" "$REL/writable"
 ln -s "$CONF/admin.env" "$REL/.env"
@@ -140,4 +141,4 @@ ls -1t /opt/mailrunner-admin/releases | tail -n +4 | while read -r old; do
 done
 
 grep -Eq '^ENTRA_CLIENT_SECRET *= *[^ ]' "$CONF/admin.env" || echo "NOTE: Entra ID not configured yet - fill in ENTRA_* in $CONF/admin.env"
-echo "Installed MailRunner Admin $VERSION as $REL: https://$HOST/  (node trust: --admin-ca=$CONF/mtls/ca.pem)"
+echo "Installed MailRunner Admin $VERSION (node version $NODE_VERSION) as $REL: https://$HOST/  (node trust: --admin-ca=$CONF/mtls/ca.pem)"

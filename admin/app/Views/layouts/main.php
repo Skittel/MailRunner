@@ -57,7 +57,7 @@
             </div>
         </div>
         <footer class="footer footer-transparent d-print-none">
-            <div class="container-xl text-secondary small">MailRunner Admin · <a href="https://github.com/Skittel/MailRunner" class="link-secondary">github.com/Skittel/MailRunner</a></div>
+            <div class="container-xl text-secondary small">MailRunner Admin <?= esc(\App\Controllers\Enroll::adminVersion()) ?> · Node <?= esc(\App\Controllers\Enroll::version()) ?> · <a href="https://github.com/Skittel/MailRunner" class="link-secondary">github.com/Skittel/MailRunner</a></div>
         </footer>
     </div>
 </div>
