@@ -262,10 +262,10 @@ systemctl disable --now mailrunner-analyze.path >/dev/null 2>&1 || true
 rm -f /etc/systemd/system/mailrunner-analyze.path /etc/systemd/system/mailrunner-analyze.service
 install -m 0644 "$T"/systemd/mailrunner-* /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now mailrunner-import.path mailrunner-apply.path mailrunner-maintenance.timer mailrunner-update.path >/dev/null 2>&1
+systemctl enable --now mailrunner-import.path mailrunner-webhook.path mailrunner-apply.path mailrunner-maintenance.timer mailrunner-update.path >/dev/null 2>&1
 # journal of delivery attempts (reads the mail log; restart picks up a new release)
 systemctl enable mailrunner-smtplog >/dev/null 2>&1
-systemctl reset-failed mailrunner-import.service mailrunner-import.path >/dev/null 2>&1 || true
+systemctl reset-failed mailrunner-import.service mailrunner-import.path mailrunner-webhook.service mailrunner-webhook.path >/dev/null 2>&1 || true
 systemctl restart mailrunner-smtplog mailrunner-import.path
 
 log "API (php-fpm + nginx)"

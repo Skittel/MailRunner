@@ -70,4 +70,12 @@ class Services extends BaseService
         return new RouteService(db_connect(), static::journalWriter(), static::projectService());
     }
 
+    public static function webhookService(bool $getShared = true): \App\Core\Webhooks\WebhookService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('webhookService');
+        }
+
+        return new \App\Core\Webhooks\WebhookService(db_connect(), static::journalWriter(), config('Mailrunner')->dataDir . '/webhook.request');
+    }
 }

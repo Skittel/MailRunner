@@ -20,6 +20,9 @@ $routes->group('v1', ['filter' => 'bearer'], static function (RouteCollection $r
         $routes->post('messages/ack', '\App\Modules\Receive\Controllers\Customer\Messages::ack');
         $routes->get('messages/(:segment)/raw', '\App\Modules\Receive\Controllers\Customer\Messages::raw/$1');
         $routes->get('messages/(:segment)', '\App\Modules\Receive\Controllers\Customer\Messages::show/$1');
+        $routes->get('webhook', '\App\Controllers\V1\Webhook::show');
+        $routes->put('webhook', '\App\Controllers\V1\Webhook::put');
+        $routes->delete('webhook', '\App\Controllers\V1\Webhook::delete');
     }
 });
 

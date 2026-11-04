@@ -1,0 +1,9 @@
+[Unit]
+Description=MailRunner: send webhook pings after new mail
+
+[Path]
+PathExists=/var/lib/mailrunner/webhook.request
+Unit=mailrunner-webhook.service
+
+[Install]
+WantedBy=multi-user.target

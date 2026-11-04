@@ -1,0 +1,19 @@
+[Unit]
+Description=MailRunner: send webhook pings (spark mr:webhook:send)
+After=mariadb.service
+# Started for every import with new mail; runs while pings wait for their cooldown.
+StartLimitIntervalSec=60
+StartLimitBurst=1000
+
+[Service]
+Type=oneshot
+User=mailrunner
+Group=mailrunner
+ExecStart=/usr/bin/php /opt/mailrunner/current/spark mr:webhook:send
+ExecStartPost=/bin/sleep 1
+TimeoutStartSec=4000
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/mailrunner

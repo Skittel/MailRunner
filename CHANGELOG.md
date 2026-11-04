@@ -2,6 +2,16 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
+## 0.1.30 - 2026-11-05
+- Webhooks: `PUT|GET|DELETE /v1/webhook` (customer token) with `url` and `cooldown_seconds` (1-3600, default 2).
+  After an import with new mail the project's webhook gets an empty POST (`X-MailRunner-Event: messages`, 5 s,
+  no redirects, never repeated); at most one per cooldown, mail during the cooldown gets a ping when it ends.
+  Only https on port 443 to hosts with public addresses only, checked on PUT and before every ping (the
+  connection is pinned to the checked addresses). Journal `webhook.updated/deleted/sent/failed`, URL shortened.
+- `mailrunner-webhook.path/.service` (`mr:webhook:send`), `mr:webhook:list`, `mr:webhook:delete`.
+  Node admin API project detail reports the webhook state.
+- Migration: `project_webhooks`.
+
 ## 0.1.29 - 2026-11-04
 - Central API tokens: `PUT /admin/v1/projects/...` takes an optional `tokens` list (full set, hashes only). Unknown
   tokens are added, missing ones revoked; a local revocation is kept. Afterwards local token create/rotate is

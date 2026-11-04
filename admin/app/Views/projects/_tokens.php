@@ -1,4 +1,4 @@
-<?php $lastUsed ??= []; $error ??= null; $imported ??= true; $local ??= false; ?>
+<?php $lastUsed ??= []; $error ??= null; $imported ??= true; $local ??= false; $webhooks ??= []; ?>
 <?php if ($local): ?><div class="card-body border-bottom small text-secondary">Self-Test-Projekt: lokale Tokens der Node (install.sh), nicht zentral verwaltet.</div><?php endif ?>
 <?php if ($error): ?><div class="card-body border-bottom"><div class="alert alert-warning mb-0">Übertragung an die Node: <?= esc($error) ?></div></div><?php endif ?>
 <?php if ($created): ?>
@@ -29,3 +29,12 @@
         <div class="col-2"><button class="btn btn-sm btn-primary w-100">Neu</button></div></div>
     <div class="form-hint">Leer = ohne Ablauf. Tokens werden zentral verwaltet und gelten auf allen Nodes des Projekts.</div>
 </form><?php endif ?>
+<?php foreach ($webhooks as $where => $w): ?>
+    <div class="card-body border-top small">
+        <div class="fw-bold">Webhook (<?= esc($where) ?>, vom Kunden per API gesetzt)</div>
+        <div><span class="mono"><?= esc($w['url']) ?></span> · Abstand <?= (int) $w['cooldown_seconds'] ?> s<?= $w['pending'] ? ' · <span class="badge bg-yellow-lt">Ping wartet</span>' : '' ?></div>
+        <div class="text-secondary">Letzter Ping: <?= $w['last_attempt_at'] ? ago($w['last_attempt_at']) . ' · ' . ($w['last_status'] === null ? 'läuft' : ($w['last_status'] === 'sent'
+            ? '<span class="text-green">HTTP ' . (int) $w['last_http_code'] . '</span>'
+            : '<span class="text-red">fehlgeschlagen: ' . esc(trim(($w['last_http_code'] ? 'HTTP ' . (int) $w['last_http_code'] . ' ' : '') . ($w['last_error'] ?? ''))) . '</span>')) : 'noch keiner' ?></div>
+    </div>
+<?php endforeach ?>

@@ -22,6 +22,9 @@ class Importer
 {
     public const MESSAGE_PREFIX = 'mrm';
 
+    /** @var list<int> projects that got new messages in the last run (webhook pings) */
+    private array $importedProjects = [];
+
     public function __construct(
         private readonly BaseConnection $db,
         private readonly JournalWriter $journal,
@@ -35,7 +38,8 @@ class Importer
      */
     public function run(): array
     {
-        $stats = ['imported' => 0, 'duplicates' => 0, 'failed' => 0];
+        $stats                  = ['imported' => 0, 'duplicates' => 0, 'failed' => 0];
+        $this->importedProjects = [];
         $lock  = fopen($this->spoolDir . '/.import.lock', 'c');
         if ($lock === false || ! flock($lock, LOCK_EX | LOCK_NB)) {
             return $stats; // another import is running
@@ -78,6 +82,7 @@ class Importer
                 ?? throw new \RuntimeException('Project #' . $meta['project_id'] . ' no longer exists');
 
             $messageId = RandomId::publicId(self::MESSAGE_PREFIX);
+            $this->importedProjects[] = (int) $project['id'];
             $status    = $meta['profile'] === 'analysis' ? 'analyzed' : 'pending';
             $this->db->table('receive_messages')->insert([
                 'message_id'      => $messageId,
@@ -137,6 +142,12 @@ class Importer
         unlink($this->spoolDir . '/analyzed/' . $spoolId . '.json');
 
         return $imported;
+    }
+
+    /** @return list<int> */
+    public function importedProjectIds(): array
+    {
+        return array_values(array_unique($this->importedProjects));
     }
 
     private static function cut(?string $value, int $length): string

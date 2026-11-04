@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MailRunner customer API (receive)
-  version: 0.0.18
+  version: 0.1.30
   description: |
     Pull API of a MailRunner node. A client application collects the messages the node accepted
     for its project. A token belongs to exactly one project and only sees that project's data.
@@ -165,6 +165,76 @@ paths:
         '400': { $ref: '#/components/responses/InvalidRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /v1/webhook:
+    get:
+      summary: Webhook of the project
+      description: State of the webhook; data is null if none is set. The URL is shown shortened, with its SHA-256.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Webhook' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      summary: Set or replace the webhook (idempotent)
+      description: |
+        MailRunner sends an empty POST to the URL when new mail of the project is stored and can be fetched
+        (header `X-MailRunner-Event: messages`). At most one ping per cooldown: the first mail is announced at once,
+        mail arriving during the cooldown gets one more ping when it ends. Timeout 5 s, redirects are not followed,
+        pings are never repeated: keep polling (e.g. every 60 s) and make sure a ping and a poll do not fetch at
+        the same time. Allowed targets: `https://` on port 443 whose host resolves only to public addresses
+        (checked on PUT and again before every ping). Journal: `webhook.updated`, `webhook.deleted`,
+        `webhook.sent` and `webhook.failed` (with `http_code` or `error`: `http`, `timeout`, `connect`, `tls`,
+        `dns`, `blocked_address`). The webhook belongs to the node: set it on every node the application fetches from.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, maxLength: 2048, example: 'https://app.example.com/hooks/mailrunner/<random>' }
+                cooldown_seconds: { type: integer, minimum: 1, maximum: 3600, default: 2 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Webhook' }
+                      changed: { type: boolean }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422':
+          description: INVALID_WEBHOOK_URL or cooldown out of range
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      summary: Remove the webhook
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      deleted: { type: boolean, description: 'false if none was set' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
   /v1/journal:
     get:
       summary: Events of the project, oldest first
@@ -274,6 +344,22 @@ components:
         request_id: { type: string, example: 87397291419ab51f }
         time: { type: string, format: date-time }
 
+    Webhook:
+      type: object
+      nullable: true
+      properties:
+        url: { type: string, example: 'https://app.example.com/…x7k2', description: 'host and the last 4 characters only' }
+        url_sha256: { type: string }
+        cooldown_seconds: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        pending: { type: boolean, description: 'new mail waits for the end of the cooldown' }
+        last_attempt_at: { type: string, format: date-time, nullable: true }
+        last_status: { type: string, enum: [sent, failed], nullable: true }
+        last_http_code: { type: integer, nullable: true }
+        last_error: { type: string, nullable: true }
+        last_sent_at: { type: string, format: date-time, nullable: true }
+        last_failed_at: { type: string, format: date-time, nullable: true }
     Error:
       allOf:
         - $ref: '#/components/schemas/Envelope'

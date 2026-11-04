@@ -9,7 +9,7 @@ use App\Core\Support\Time;
 
 /**
  * GET    /admin/v1/projects
- * GET    /admin/v1/projects/{customer}/{project}          incl. routes and tokens (hash, never the secret)
+ * GET    /admin/v1/projects/{customer}/{project}          incl. routes, tokens (hash, never the secret) and webhook state
  * PUT    /admin/v1/projects/{customer}/{project}          complete configuration, idempotent:
  *        {"profile": "analysis", "name": "...", "enabled": true, "routes": ["example.org", ...],
  *         "settings": {"recipient_pattern": ..., "journal_scope": ..., "role_mail": ..., ...},
@@ -45,6 +45,7 @@ class Projects extends AdminController
             return ApiResponse::ok(['data' => self::present($p, array_column(service('routeService')->list($ref), 'route')) + [
                 'messages_unacked' => $unacked,
                 'tokens_central' => (int) ($p['tokens_central'] ?? 0) === 1,
+                'webhook' => \App\Core\Webhooks\WebhookService::present(service('webhookService')->get((int) $p['id'])), // set by the customer (PUT /v1/webhook)
                 'tokens' => array_map(static fn ($t) => [
                     'token_id' => $t['token_id'], 'label' => $t['label'], 'secret_hash' => $hashes[$t['token_id']] ?? null, 'created_at' => Time::toIso($t['created_at']),
                     'expires_at' => Time::toIso($t['expires_at']), 'revoked_at' => Time::toIso($t['revoked_at']),

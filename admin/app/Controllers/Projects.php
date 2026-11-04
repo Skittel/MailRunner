@@ -199,9 +199,14 @@ class Projects extends BaseController
         $tokens   = $local ? array_map(static fn ($t) => $t + ['origin' => 'local'], array_reverse($this->sync()->projectOnNode((int) $p['id'], (int) $p['node_id'])['tokens'] ?? []))
             : (new Tokens())->list((int) $p['id']);
         $lastUsed = [];
+        $webhooks = [];
         $nodeIds  = array_filter([(int) $p['node_id'], (int) ($p['move_from_node_id'] ?? 0)]);
-        foreach ($nodeIds as $nid) {
-            foreach ($this->sync()->projectOnNode((int) $p['id'], $nid)['tokens'] ?? [] as $t) {
+        foreach ($nodeIds as $i => $nid) {
+            $onNode = $this->sync()->projectOnNode((int) $p['id'], $nid);
+            if (! empty($onNode['webhook'])) {
+                $webhooks[$i === 0 ? 'Node' : 'alte Node'] = $onNode['webhook']; // set by the customer over the node API
+            }
+            foreach ($onNode['tokens'] ?? [] as $t) {
                 if ($t['last_used_at'] !== null && ($lastUsed[$t['token_id']] ?? '') < $t['last_used_at']) {
                     $lastUsed[$t['token_id']] = $t['last_used_at'];
                 }
@@ -209,7 +214,7 @@ class Projects extends BaseController
         }
 
         return view('projects/_tokens', ['project' => $p, 'tokens' => $tokens, 'lastUsed' => $lastUsed, 'created' => $created,
-            'error' => $error, 'imported' => $local || $p['tokens_imported_at'] !== null, 'local' => $local]);
+            'error' => $error, 'imported' => $local || $p['tokens_imported_at'] !== null, 'local' => $local, 'webhooks' => $webhooks]);
     }
 
     /**

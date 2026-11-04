@@ -21,7 +21,10 @@ class Import extends MrCommand
         $config = config('Mailrunner');
         $crypto = NodeCrypto::forNode();
         // messages first, so that smtp.attempt events can name their message ids
-        $stats = (new Importer(db_connect(), service('journalWriter'), $crypto, $config->receiveSpoolDir()))->run();
+        $importer = new Importer(db_connect(), service('journalWriter'), $crypto, $config->receiveSpoolDir());
+        $stats    = $importer->run();
+        // after commit: the mail can be fetched now, so the webhook ping cannot arrive too early
+        service('webhookService')->markPending($importer->importedProjectIds());
         $smtp  = (new SmtpSessionImporter(db_connect(), service('journalWriter'), $crypto, $config->receiveSpoolDir()))->run();
         $this->json() ? $this->outputJson($stats + ['smtp_sessions' => $smtp]) : $this->ok(sprintf(
             'Messages: imported %d, duplicates %d, failed %d. SMTP sessions: imported %d, duplicates %d, failed %d',
