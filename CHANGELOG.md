@@ -2,6 +2,10 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
+## 0.1.27 - 2026-11-04
+- Update: a source checkout on a branch (development node) is fast-forwarded to the tag instead of detaching
+  HEAD; commits made after an automatic update stayed outside the branch.
+
 ## 0.1.26 - 2026-11-04
 - Node: MailRunner favicon instead of the CodeIgniter default.
 

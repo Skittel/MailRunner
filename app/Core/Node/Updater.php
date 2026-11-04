@@ -107,10 +107,18 @@ class Updater
 
     /**
      * Checks out the tag and runs the installer; returns its exit code. Each output line goes to $out.
+     * A checkout on a branch (development node) stays on it when the tag is ahead: the branch is fast-forwarded to
+     * the tag instead of detaching HEAD, so later commits do not end up outside the branch.
      */
     public function run(string $target, bool $force, callable $out): int
     {
-        $this->git($force ? ['checkout', '-q', '-f', 'v' . $target] : ['checkout', '-q', 'v' . $target]);
+        $tag    = 'v' . $target;
+        $branch = trim((string) $this->git(['symbolic-ref', '-q', '--short', 'HEAD'], false));
+        if ($branch !== '' && $this->git(['merge-base', '--is-ancestor', 'HEAD', $tag], false) !== null) {
+            $this->git($force ? ['reset', '-q', '--hard', $tag] : ['merge', '-q', '--ff-only', $tag]);
+        } else {
+            $this->git($force ? ['checkout', '-q', '-f', $tag] : ['checkout', '-q', $tag]);
+        }
         $proc = proc_open($this->installer, [1 => ['pipe', 'w'], 2 => ['redirect', 1]], $pipes, $this->sourceDir);
         if (! is_resource($proc)) {
             throw new RuntimeException('cannot start installer');

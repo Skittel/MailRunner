@@ -96,4 +96,21 @@ final class UpdaterTest extends CIUnitTestCase
         $this->assertSame(0, $code);
         $this->assertSame(['installing', 'b'], $lines);
     }
+
+    public function testRunOnABranchFastForwardsInsteadOfDetaching(): void
+    {
+        $this->git('checkout -q -B main v0.1.0');
+        $this->assertSame(0, $this->updater('0.1.0')->run('0.1.1', false, static function () {}));
+        exec('git -C ' . escapeshellarg($this->repo) . ' symbolic-ref -q --short HEAD', $out);
+        $this->assertSame(['main'], $out);
+        $this->assertSame("b\n", file_get_contents($this->repo . '/install.txt'));
+    }
+
+    public function testRunDetachesWhenTheBranchIsNotBehindTheTag(): void
+    {
+        $this->git('checkout -q -B main v0.1.1');
+        $this->assertSame(0, $this->updater('0.1.1')->run('0.1.0', false, static function () {}));
+        exec('git -C ' . escapeshellarg($this->repo) . ' symbolic-ref -q --short HEAD', $out, $code);
+        $this->assertSame(1, $code); // detached at the older tag, main untouched
+    }
 }
