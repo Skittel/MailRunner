@@ -2,6 +2,12 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
+## 0.1.31 - 2026-11-04
+- Webhook: parallel `PUT /v1/webhook` of one project are serialised (project row lock); two simultaneous first
+  PUTs made one fail with HTTP 500 (duplicate key). Same for `DELETE`.
+- API: uncaught errors under `/v1` and `/admin/v1` answer HTTP 500 with the JSON error `INTERNAL_ERROR` and the
+  `request_id` (also written to the log) instead of an empty body.
+
 ## 0.1.30 - 2026-11-04
 - Webhooks: `PUT|GET|DELETE /v1/webhook` (customer token) with `url` and `cooldown_seconds` (1-3600, default 2).
   After an import with new mail the project's webhook gets an empty POST (`X-MailRunner-Event: messages`, 5 s,

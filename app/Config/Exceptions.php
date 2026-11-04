@@ -101,6 +101,10 @@ class Exceptions extends BaseConfig
      */
     public function handler(int $statusCode, Throwable $exception): ExceptionHandlerInterface
     {
+        if (! is_cli() && preg_match('#^/?(admin/)?v1(/|$)#', (string) service('request')->getPath()) === 1) {
+            return new \App\Core\Api\JsonExceptionHandler(); // API clients get the JSON error format, never an HTML page or an empty body
+        }
+
         return new ExceptionHandler($this);
     }
 }

@@ -210,4 +210,36 @@ final class WebhookTest extends CIUnitTestCase
             $this->assertSame($public, WebhookService::isPublic($ip), $ip);
         }
     }
+
+    public function testParallelFirstPutIsSerialised(): void
+    {
+        // a second connection holds the project lock as a parallel request would; the PUT must wait, not fail
+        $other = \Config\Database::connect('tests', false);
+        $other->transBegin();
+        $other->query('SELECT id FROM projects WHERE id = ? FOR UPDATE', [(int) service('projectService')->get('acme/inbound')['id']]);
+        $other->query('SET SESSION innodb_lock_wait_timeout = 1');
+        db_connect()->query('SET SESSION innodb_lock_wait_timeout = 1');
+        try {
+            service('webhookService')->set((int) service('projectService')->get('acme/inbound')['id'], self::URL, 2, new ChangeContext('api', 't'));
+            $this->fail('expected a lock wait while the other request holds the project');
+        } catch (\Throwable $e) {
+            $this->assertStringContainsStringIgnoringCase('lock wait', $e->getMessage());
+        } finally {
+            $other->transRollback();
+        }
+        [, $json] = $this->api('PUT', ['url' => self::URL]);
+        $this->assertTrue($json['changed']);
+    }
+
+    public function testUncaughtApiErrorsAreJson(): void
+    {
+        $response = service('response');
+        $this->expectOutputRegex("/INTERNAL_ERROR/");
+        (new \App\Core\Api\JsonExceptionHandler())->handle(new \RuntimeException('secret detail'), service('request'), $response, 500, 1);
+        $body = json_decode((string) $response->getBody(), true);
+        $this->assertSame(500, $response->getStatusCode());
+        $this->assertSame('INTERNAL_ERROR', $body['error']['code']);
+        $this->assertNotEmpty($body['request_id']);
+        $this->assertStringNotContainsString('secret detail', (string) $response->getBody());
+    }
 }

@@ -58,6 +58,7 @@ class WebhookService
         $this->resolveTarget($url); // throws INVALID_WEBHOOK_URL
 
         return Transaction::run($this->db, function () use ($projectId, $url, $cooldown, $ctx): array {
+            $this->lockProject($projectId); // parallel PUTs of one project run one after the other (first insert raced)
             $old = $this->db->table('project_webhooks')->where('project_id', $projectId)->get()->getRowArray();
             if ($old !== null && $old['url'] === $url && (int) $old['cooldown_seconds'] === $cooldown) {
                 return [$old, false];
@@ -81,6 +82,7 @@ class WebhookService
     public function delete(int $projectId, ChangeContext $ctx): bool
     {
         return Transaction::run($this->db, function () use ($projectId, $ctx): bool {
+            $this->lockProject($projectId);
             $old = $this->get($projectId);
             if ($old === null) {
                 return false;
@@ -193,6 +195,11 @@ class WebhookService
             'last_status' => $w['last_status'], 'last_http_code' => $w['last_http_code'] !== null ? (int) $w['last_http_code'] : null,
             'last_error' => $w['last_error'], 'last_sent_at' => Time::toIso($w['last_sent_at']), 'last_failed_at' => Time::toIso($w['last_failed_at']),
         ];
+    }
+
+    private function lockProject(int $projectId): void
+    {
+        $this->db->query('SELECT id FROM projects WHERE id = ? FOR UPDATE', [$projectId]);
     }
 
     private function customerId(int $projectId): ?int
