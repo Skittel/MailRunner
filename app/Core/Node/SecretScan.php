@@ -21,7 +21,7 @@ use RecursiveIteratorIterator;
 class SecretScan
 {
     /** Settings that are configuration, not secrets. */
-    private const NOT_SECRET = '/(^CI_ENVIRONMENT$|hostname$|DBDriver$|savePath$|baseURL$|\.database$|username$|_NAMES$|_DIR$|_PATH$|_FILE$|_ENABLED$|_DAYS$|_ID$)/i';
+    private const NOT_SECRET = '/(^CI_ENVIRONMENT$|^SELFTEST_SMTP_USER$|hostname$|DBDriver$|savePath$|baseURL$|\.database$|username$|_NAMES$|_DIR$|_PATH$|_FILE$|_ENABLED$|_DAYS$|_ID$)/i';
 
     private const MIN_LENGTH = 12;
     private const MAX_FILE   = 50_000_000;

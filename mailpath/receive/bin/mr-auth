@@ -74,8 +74,11 @@ async def handle(reader, writer):
                         pending[rid] = {"mech": "PLAIN", "params": params}
                         writer.write(f"CONT\t{rid}\t\n".encode())
                 elif mech == "LOGIN":
-                    pending[rid] = {"mech": "LOGIN", "params": params, "user": None}
-                    writer.write(f"CONT\t{rid}\t{auth.b64('Username:')}\n".encode())
+                    # the client may send the username with the command (initial response)
+                    user = auth.unb64(params["resp"]) if isinstance(params.get("resp"), str) else None
+                    pending[rid] = {"mech": "LOGIN", "params": params, "user": user}
+                    prompt = "Username:" if user is None else "Password:"
+                    writer.write(f"CONT\t{rid}\t{auth.b64(prompt)}\n".encode())
                 else:
                     writer.write(f"FAIL\t{rid}\treason=unsupported mechanism\n".encode())
             elif cmd == "CONT" and len(fields) >= 3 and fields[1] in pending:

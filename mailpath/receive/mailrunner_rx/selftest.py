@@ -706,7 +706,7 @@ def submission_checks(run, env=None):
             s.quit()
             return "fail", f"recipient accepted without AUTH ({code})"
         try:
-            s.login(user, password + "x")
+            s.auth("PLAIN", lambda challenge=None: f"\0{user}\0{password}x")   # one attempt only (rate limit)
             s.quit()
             return "fail", "wrong password accepted"
         except smtplib.SMTPAuthenticationError:

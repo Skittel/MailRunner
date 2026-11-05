@@ -131,6 +131,15 @@ class Protocol(unittest.TestCase):
         self.assertEqual(f"CONT\t5\t{b('Password:')}", out[1])
         self.assertEqual("OK\t5\tuser=old@example.org", out[2])   # allowed without TLS
 
+    def test_login_with_initial_response(self):
+        b = lambda s: base64.b64encode(s.encode()).decode()
+        _, out = self.run_session([
+            f"AUTH\t6\tLOGIN\tservice=submission\tsecured\trip=198.51.100.7\tresp={b('app@example.org')}",
+            f"CONT\t6\t{b('current-password-1234')}",
+        ])
+        self.assertEqual(f"CONT\t6\t{b('Password:')}", out[0])
+        self.assertEqual("OK\t6\tuser=app@example.org", out[1])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,6 +2,12 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
+## 0.1.33 - 2026-11-05
+- mr-auth: `AUTH LOGIN` with the username in the command (initial response, e.g. Python smtplib) read the
+  password as the username and failed.
+- Secret scan: `SELFTEST_SMTP_USER` is a user name, not a secret (false `base.secret_leak` failure).
+- Self test: the wrong-password check makes one attempt only.
+
 ## 0.1.32 - 2026-11-05
 - SMTP AUTH for customers: `GET|POST /v1/smtp-credentials`, `PATCH|DELETE /v1/smtp-credentials/{id}`,
   `POST .../rotate` (profile checked_auth; password generated, shown once; rotation grace up to 7 days).
