@@ -250,7 +250,7 @@ submission inet n       -       n       -       -       smtpd
   -o smtpd_client_restrictions=
   -o smtpd_helo_restrictions=
   -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
-  -o smtpd_recipient_restrictions=reject_non_fqdn_recipient,permit_sasl_authenticated,reject
+  -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject
 smtps     inet  n       -       n       -       -       smtpd
   -o syslog_name=postfix/smtps
   -o smtpd_tls_wrappermode=yes
@@ -261,7 +261,7 @@ smtps     inet  n       -       n       -       -       smtpd
   -o smtpd_client_restrictions=
   -o smtpd_helo_restrictions=
   -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
-  -o smtpd_recipient_restrictions=reject_non_fqdn_recipient,permit_sasl_authenticated,reject
+  -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject
 MASTER
 log "Database migrations, node key, mail path configuration"
 runuser -u mailrunner -- php /opt/mailrunner/current/spark migrate --all

@@ -2,6 +2,16 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
+## 0.1.34 - 2026-11-05
+- SMTP credentials: `password` may be set over the API (`POST /v1/smtp-credentials`, `POST .../rotate`), so an
+  application can use the same login on several nodes; a password set this way is never returned. Without it
+  the node generates one as before.
+- Authenticated mail is accepted whatever sender and recipient say: Postfix checks (non-FQDN recipient,
+  pipelining) no longer apply after AUTH; the mail is stored even if parsing or the analysis fails
+  (`analysis_status: error`) or takes too long (also for profile checked_auth, which answered 451 before).
+- New field `receive_messages.auth_username`: the login used; API `auth.username`, journal `receive.received`.
+- Migration: `auth_username`, `analysis_status` value `error`.
+
 ## 0.1.33 - 2026-11-05
 - mr-auth: `AUTH LOGIN` with the username in the command (initial response, e.g. Python smtplib) read the
   password as the username and failed.

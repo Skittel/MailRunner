@@ -91,6 +91,7 @@ class Importer
                 'profile'         => $meta['profile'],
                 'received_via'    => ($meta['received_via'] ?? 'mx') === 'auth' ? 'auth' : 'mx',
                 'auth_credential_id' => self::cutOrNull($meta['auth_credential_id'] ?? null, 32),
+                'auth_username'   => self::cutOrNull($meta['auth_username'] ?? null, 100),
                 'smtp_service'    => self::cutOrNull($meta['smtp_service'] ?? null, 16),
                 'role'            => in_array($meta['role'] ?? null, ConfigBuilder::ROLE_LOCALPARTS, true) ? $meta['role'] : null,
                 'status'          => $status,
@@ -117,7 +118,7 @@ class Importer
                 'attachments'     => json_encode($meta['attachments'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 'spf_status'      => self::cutOrNull($meta['spf_status'] ?? null, 16),
                 'dkim_status'     => self::cutOrNull($meta['dkim_status'] ?? null, 16),
-                'analysis_status' => ($meta['analysis_status'] ?? 'ok') === 'timeout' ? 'timeout' : 'ok',
+                'analysis_status' => in_array($meta['analysis_status'] ?? 'ok', ['timeout', 'error'], true) ? $meta['analysis_status'] : 'ok',
                 'analysis_ms'     => isset($meta['analysis_ms']) ? (int) $meta['analysis_ms'] : null,
                 'analysis_path'   => $meta['analysis_path'] ?? null,
                 'raw_path'        => $meta['raw_path'] ?? null,
@@ -128,7 +129,7 @@ class Importer
             $this->journal->append('receive.received', new ChangeContext('system', 'mr:import'), (int) $project['customer_id'], (int) $project['id'], [
                 'message_id' => $messageId, 'status' => $status, 'profile' => $meta['profile'],
                 'analysis' => $meta['analysis_status'] ?? 'ok',
-            ] + ($via === 'auth' ? ['received_via' => 'auth', 'credential_id' => $meta['auth_credential_id'] ?? null, 'service' => $meta['smtp_service'] ?? null] : []));
+            ] + ($via === 'auth' ? ['received_via' => 'auth', 'credential_id' => $meta['auth_credential_id'] ?? null, 'username' => $meta['auth_username'] ?? null, 'service' => $meta['smtp_service'] ?? null] : []));
             if ($via === 'auth' && ! empty($meta['auth_credential_id'])) {
                 $this->db->table('smtp_credentials')->where('credential_id', $meta['auth_credential_id'])->update(['last_used_at' => Time::now()]);
             }

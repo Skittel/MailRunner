@@ -115,9 +115,29 @@ final class SmtpCredentialsTest extends CIUnitTestCase
         $this->assertSame([], $json['data']);
         [$status] = $this->api('POST', 'smtp-credentials', ['username' => 'shop@example.org']);
         $this->assertSame(201, $status, 'a revoked credential frees its username');
+        [$status, $json] = $this->api('POST', 'smtp-credentials', ['username' => 'weak@example.org', 'password' => 'short']);
+        $this->assertSame([422, 'WEAK_PASSWORD'], [$status, $json['error']['code']]);
 
         $events = array_column(db_connect()->table('journal')->like('event', 'credential.', 'after')->orderBy('id')->get()->getResultArray(), 'event');
+        $this->assertStringNotContainsString('short', json_encode(db_connect()->table('journal')->get()->getResultArray()));
         $this->assertSame(['credential.created', 'credential.updated', 'credential.rotated', 'credential.revoked', 'credential.created'], $events);
+    }
+
+    public function testPasswordSetByTheApplication(): void
+    {
+        // the same login on several nodes: the application chooses the password
+        [$status, $json, $raw] = $this->api('POST', 'smtp-credentials', ['username' => 'multi@example.org', 'password' => 'chosen-by-the-app-123']);
+        $this->assertSame(201, $status);
+        $this->assertArrayNotHasKey('password', $json, 'a password set by the application is not echoed');
+        $this->assertStringNotContainsString('chosen-by-the-app-123', $raw);
+        $this->assertTrue(service('smtpCredentialService')->verifyPassword('multi@example.org', 'chosen-by-the-app-123'));
+
+        [$status, $json] = $this->api('POST', 'smtp-credentials/' . $json['data']['credential_id'] . '/rotate', ['password' => 'second-app-password-456', 'grace_seconds' => 60]);
+        $this->assertSame(200, $status);
+        $this->assertArrayNotHasKey('password', $json);
+        $this->assertTrue(service('smtpCredentialService')->verifyPassword('multi@example.org', 'second-app-password-456'));
+        $this->assertTrue(service('smtpCredentialService')->verifyPassword('multi@example.org', 'chosen-by-the-app-123'), 'old one during grace');
+        $this->assertStringNotContainsString('chosen-by-the-app', json_encode(db_connect()->table('journal')->get()->getResultArray()));
     }
 
     public function testGeneratedFilesForTheMailPath(): void
@@ -152,8 +172,9 @@ final class SmtpCredentialsTest extends CIUnitTestCase
             'helo' => 'shop.example.org', 'mail_from' => 'shop@example.org', 'rcpt' => 'anyone@unrouted.invalid', 'project_id' => (int) $project['id'],
             'project' => 'acme/app', 'profile' => 'checked_auth', 'size' => 10, 'sha256' => str_repeat('c', 64), 'attachments' => [],
             'header_from' => null, 'header_to' => null, 'subject' => 'S', 'date_hdr' => null, 'message_id_hdr' => null, 'spf_status' => 'none',
-            'dkim_status' => 'none', 'analysis_status' => 'ok', 'client_info' => null, 'analysis_ms' => 5, 'analysis_path' => null, 'raw_path' => null,
-            'received_via' => 'auth', 'auth_credential_id' => $id, 'smtp_service' => 'submission',
+            'dkim_status' => 'none', 'client_info' => null, 'analysis_ms' => 5, 'analysis_path' => null, 'raw_path' => null,
+            'received_via' => 'auth', 'auth_credential_id' => $id, 'auth_username' => 'shop@example.org', 'smtp_service' => 'submission',
+            'analysis_status' => 'error',
         ];
         file_put_contents($this->dir . '/data/receive/spool/analyzed/a1.json', $crypto->encryptJson($meta, 'spool:a1:analyzed'));
         (new Importer(db_connect(), service('journalWriter'), $crypto, $this->dir . '/data/receive/spool'))->run();
@@ -161,11 +182,12 @@ final class SmtpCredentialsTest extends CIUnitTestCase
         [$status, $json] = $this->api('GET', 'messages');
         $this->assertSame(200, $status);
         $this->assertSame('auth', $json['data'][0]['received_via']);
-        $this->assertSame(['credential_id' => $id, 'service' => 'submission'], $json['data'][0]['auth']);
+        $this->assertSame(['credential_id' => $id, 'username' => 'shop@example.org', 'service' => 'submission'], $json['data'][0]['auth']);
+        $this->assertSame('error', $json['data'][0]['analysis_status'], 'stored although the analysis failed');
         $this->assertSame('anyone@unrouted.invalid', $json['data'][0]['envelope']['rcpt']);
         [, $list] = $this->api('GET', 'smtp-credentials');
         $this->assertNotNull($list['data'][0]['last_used_at']);
         $event = json_decode(db_connect()->table('journal')->where('event', 'receive.received')->get()->getRow('details'), true);
-        $this->assertSame(['auth', $id], [$event['received_via'], $event['credential_id']]);
+        $this->assertSame(['auth', $id, 'shop@example.org'], [$event['received_via'], $event['credential_id'], $event['username']]);
     }
 }

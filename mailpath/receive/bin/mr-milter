@@ -94,6 +94,7 @@ class ReceiveMilter(Milter.Base):
         self.body_chunks = []
         self.size = 0
         self.auth = None        # credential entry of an authenticated session
+        self.auth_username = None
 
     # Ask Postfix for headers with their original leading space (exact raw rebuild for DKIM).
     def negotiate(self, opts):
@@ -131,6 +132,7 @@ class ReceiveMilter(Milter.Base):
         login = self.getsymval("{auth_authen}")
         if login:
             self.auth = CREDENTIALS.get(login)
+            self.auth_username = login.strip().lower()
             if self.auth is None:   # revoked between AUTH and MAIL FROM
                 self.setreply("454", "4.7.0", "Login no longer valid")
                 return Milter.TEMPFAIL
@@ -195,8 +197,15 @@ class ReceiveMilter(Milter.Base):
         creds = secrets.load()
         analyzer.configure_caches(creds)
         received_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        summary = message.summary(raw)
-        attachments = message.attachments(raw)
+        try:
+            summary = message.summary(raw)
+            attachments = message.attachments(raw)
+        except Exception as e:
+            if self.auth is None:
+                raise
+            # authenticated mail is stored even if it cannot be parsed
+            log(syslog.LOG_WARNING, f"queue_id={queue_id} unparsable mail stored anyway (auth): {e.__class__.__name__}")
+            summary, attachments = {}, []
         sha256 = hashlib.sha256(raw).hexdigest()
         msg = email.message_from_bytes(raw)
 
@@ -208,14 +217,20 @@ class ReceiveMilter(Milter.Base):
             analysis_status = "ok"
             try:
                 result = analyzer.analyze(raw, envelope, creds, mail_id, remaining)
-            except analyzer.AnalysisTimeout:
-                if route["profile"] != "analysis":
+            except Exception as e:
+                if not isinstance(e, analyzer.AnalysisTimeout) and self.auth is None:
+                    raise
+                # authenticated mail is always stored, even if the analysis fails or takes too long
+                if self.auth is None and route["profile"] != "analysis":
                     log(syslog.LOG_WARNING, f"queue_id={queue_id} project={route['project']} analysis timeout -> 451")
                     return "tempfail_timeout"
-                analysis_status = "timeout"
+                analysis_status = "timeout" if isinstance(e, analyzer.AnalysisTimeout) else "error"
+                if analysis_status == "error":
+                    log(syslog.LOG_WARNING, f"queue_id={queue_id} project={route['project']} analysis error {e.__class__.__name__}: {e}; stored anyway (auth)")
                 result = {"queue_id": queue_id, "smtp_mail_from": self.mail_from, "smtp_rcpt_to": rcpt,
                           "spf_status": None, "dkim_status": None, **summary,
-                          "debug": {"error": "timeout", "limit_seconds": config.ANALYSIS_LIMIT_SECONDS}}
+                          "debug": {"error": analysis_status, "limit_seconds": config.ANALYSIS_LIMIT_SECONDS}
+                          if analysis_status == "timeout" else {"error": "analysis_error", "type": e.__class__.__name__}}
 
             message_id = store.new_id()
             record = {k: result.get(k) for k in ("queue_id", "smtp_mail_from", "smtp_rcpt_to", "header_from",
@@ -235,6 +250,7 @@ class ReceiveMilter(Milter.Base):
                 "role": route.get("role"),
                 "received_via": "auth" if self.auth else "mx",
                 "auth_credential_id": self.auth["credential_id"] if self.auth else None,
+                "auth_username": self.auth_username if self.auth else None,
                 "smtp_service": self.service or None,
                 "analysis_ms": round((time.monotonic() - started) * 1000),
             }

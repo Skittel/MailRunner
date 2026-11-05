@@ -24,7 +24,7 @@ class Messages extends BaseController
     /** Max page size when the list includes the content (decrypting is per message). */
     private const CONTENT_LIMIT = 100;
 
-    public const LIST_FIELDS = 'id, message_id, spool_id, profile, received_via, auth_credential_id, smtp_service, role, status, received_at, queue_id, mail_from, rcpt, client_ip, helo,
+    public const LIST_FIELDS = 'id, message_id, spool_id, profile, received_via, auth_credential_id, auth_username, smtp_service, role, status, received_at, queue_id, mail_from, rcpt, client_ip, helo,
         client_asn, client_as_org, client_country, client_city, client_continent, client_carrier, client_is_threat,
         header_from, header_to, subject, date_hdr, attachments, spf_status, dkim_status, analysis_status, analysis_ms,
         analysis_path, raw_path, size, sha256, acked_at, content_deleted_at, delete_reason';
@@ -163,7 +163,7 @@ class Messages extends BaseController
             'status'             => $row['status'],
             'received_at'        => Time::toIso($row['received_at']),
             'received_via'       => $row['received_via'] ?? 'mx',
-            'auth'               => ($row['received_via'] ?? 'mx') === 'auth' ? ['credential_id' => $row['auth_credential_id'], 'service' => $row['smtp_service']] : null,
+            'auth'               => ($row['received_via'] ?? 'mx') === 'auth' ? ['credential_id' => $row['auth_credential_id'], 'username' => $row['auth_username'] ?? null, 'service' => $row['smtp_service']] : null,
             'envelope'           => [
                 'mail_from' => $row['mail_from'],
                 'rcpt'      => $row['rcpt'],

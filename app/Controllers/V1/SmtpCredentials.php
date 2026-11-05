@@ -16,10 +16,11 @@ use App\Core\Support\Time;
  * without recipient checks; nothing is relayed.
  *
  * GET    /v1/smtp-credentials                       list (never passwords)
- * POST   /v1/smtp-credentials                       {"username", "label"?, "plaintext_port25"?: false, "allowed_networks"?: [...]}
- *                                                   -> password once
+ * POST   /v1/smtp-credentials                       {"username", "password"?, "label"?, "plaintext_port25"?: false, "allowed_networks"?: [...]}
+ *                                                   password set by the application (same login on several nodes) or generated
+ *                                                   (then returned once)
  * PATCH  /v1/smtp-credentials/{credential_id}       {"label"?, "enabled"?, "plaintext_port25"?, "allowed_networks"?}
- * POST   /v1/smtp-credentials/{credential_id}/rotate {"grace_seconds"?: 0..604800} -> new password once
+ * POST   /v1/smtp-credentials/{credential_id}/rotate {"password"?, "grace_seconds"?: 0..604800} -> generated password once
  * DELETE /v1/smtp-credentials/{credential_id}       revoke at once (the username can be used again)
  */
 class SmtpCredentials extends BaseController
@@ -36,16 +37,17 @@ class SmtpCredentials extends BaseController
     public function create()
     {
         $b = $this->body();
-        if (! is_string($b['username'] ?? null) || (isset($b['label']) && ! is_string($b['label']))
+        if (! is_string($b['username'] ?? null) || (isset($b['label']) && ! is_string($b['label'])) || (isset($b['password']) && ! is_string($b['password']))
             || (isset($b['plaintext_port25']) && ! is_bool($b['plaintext_port25'])) || (isset($b['allowed_networks']) && ! is_array($b['allowed_networks']))) {
-            return ApiResponse::error(400, 'INVALID_REQUEST', 'Body must be {"username": "...", "label"?: "...", "plaintext_port25"?: bool, "allowed_networks"?: ["cidr", ...]}');
+            return ApiResponse::error(400, 'INVALID_REQUEST', 'Body must be {"username": "...", "password"?: "16-128 chars", "label"?: "...", "plaintext_port25"?: bool, "allowed_networks"?: ["cidr", ...]}');
         }
 
         return $this->guard(function () use ($b) {
-            $r = service('smtpCredentialService')->create($this->ref(), $b['username'], $b['label'] ?? '', null,
+            $r = service('smtpCredentialService')->create($this->ref(), $b['username'], $b['label'] ?? '', $b['password'] ?? null,
                 ! ($b['plaintext_port25'] ?? false), $b['allowed_networks'] ?? null, $this->ctx());
 
-            return ApiResponse::ok(['data' => self::present($r['credential']), 'password' => $r['password']], 201);
+            // a password set by the application is never echoed
+            return ApiResponse::ok(['data' => self::present($r['credential'])] + (isset($b['password']) ? [] : ['password' => $r['password']]), 201);
         });
     }
 
@@ -76,15 +78,17 @@ class SmtpCredentials extends BaseController
 
     public function rotate(string $id)
     {
-        $grace = $this->body()['grace_seconds'] ?? 0;
-        if (! is_int($grace) || $grace < 0 || $grace > self::MAX_GRACE) {
-            return ApiResponse::error(400, 'INVALID_REQUEST', 'grace_seconds must be 0-' . self::MAX_GRACE);
+        $b        = $this->body();
+        $grace    = $b['grace_seconds'] ?? 0;
+        $password = $b['password'] ?? null;
+        if (! is_int($grace) || $grace < 0 || $grace > self::MAX_GRACE || ($password !== null && ! is_string($password))) {
+            return ApiResponse::error(400, 'INVALID_REQUEST', 'Body: {"password"?: "16-128 chars", "grace_seconds"?: 0-' . self::MAX_GRACE . '}');
         }
 
-        return $this->guard(function () use ($id, $grace) {
-            $r = service('smtpCredentialService')->rotate($this->own($id), $grace, null, $this->ctx());
+        return $this->guard(function () use ($id, $grace, $password) {
+            $r = service('smtpCredentialService')->rotate($this->own($id), $grace, $password, $this->ctx());
 
-            return ApiResponse::ok(['data' => self::present($r['credential']), 'password' => $r['password']]);
+            return ApiResponse::ok(['data' => self::present($r['credential'])] + ($password !== null ? [] : ['password' => $r['password']]));
         });
     }
 

@@ -58,13 +58,14 @@ smtpd_reject_unlisted_recipient = no
 
 smtpd_helo_required = yes
 smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination
+# authenticated: any sender and recipient (the mail is only stored, never relayed)
 smtpd_recipient_restrictions =
-    reject_non_fqdn_recipient,
     permit_sasl_authenticated,
+    reject_non_fqdn_recipient,
     reject_unlisted_recipient,
     check_recipient_access pcre:/etc/mailrunner/generated/current/recipient_access.pcre,
     permit
-smtpd_data_restrictions = reject_unauth_pipelining
+smtpd_data_restrictions = permit_sasl_authenticated, reject_unauth_pipelining
 
 # TLS for incoming connections (offered, not required). The Received header records
 # protocol and cipher; the analysis reads them from there.
