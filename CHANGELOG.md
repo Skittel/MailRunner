@@ -2,6 +2,11 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
+## 0.1.35 - 2026-11-05
+- Database: transactions run with READ COMMITTED and retry deadlocks/conflicts (up to 3 times). MariaDB 11.8
+  checks REPEATABLE READ snapshots strictly; an API ack while mails were imported failed with HTTP 500
+  "Record has changed since last read in table journal_sequence" (seen in the self test after an update).
+
 ## 0.1.34 - 2026-11-05
 - SMTP credentials: `password` may be set over the API (`POST /v1/smtp-credentials`, `POST .../rotate`), so an
   application can use the same login on several nodes; a password set this way is never returned. Without it
