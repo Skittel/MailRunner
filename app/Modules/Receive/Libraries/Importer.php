@@ -89,6 +89,9 @@ class Importer
                 'project_id'      => $project['id'],
                 'spool_id'        => $spoolId,
                 'profile'         => $meta['profile'],
+                'received_via'    => ($meta['received_via'] ?? 'mx') === 'auth' ? 'auth' : 'mx',
+                'auth_credential_id' => self::cutOrNull($meta['auth_credential_id'] ?? null, 32),
+                'smtp_service'    => self::cutOrNull($meta['smtp_service'] ?? null, 16),
                 'role'            => in_array($meta['role'] ?? null, ConfigBuilder::ROLE_LOCALPARTS, true) ? $meta['role'] : null,
                 'status'          => $status,
                 'received_at'     => (new \DateTimeImmutable($meta['received_at']))->format(Time::DB_FORMAT),
@@ -121,10 +124,14 @@ class Importer
                 'size'            => (int) $meta['size'],
                 'sha256'          => (string) $meta['sha256'],
             ]);
+            $via = ($meta['received_via'] ?? 'mx') === 'auth' ? 'auth' : 'mx';
             $this->journal->append('receive.received', new ChangeContext('system', 'mr:import'), (int) $project['customer_id'], (int) $project['id'], [
                 'message_id' => $messageId, 'status' => $status, 'profile' => $meta['profile'],
                 'analysis' => $meta['analysis_status'] ?? 'ok',
-            ]);
+            ] + ($via === 'auth' ? ['received_via' => 'auth', 'credential_id' => $meta['auth_credential_id'] ?? null, 'service' => $meta['smtp_service'] ?? null] : []));
+            if ($via === 'auth' && ! empty($meta['auth_credential_id'])) {
+                $this->db->table('smtp_credentials')->where('credential_id', $meta['auth_credential_id'])->update(['last_used_at' => Time::now()]);
+            }
             if (in_array($meta['role'] ?? null, ConfigBuilder::ROLE_LOCALPARTS, true)) {
                 // E-18: mail to postmaster@/abuse@ is noted separately; delivery per project setting role_mail
                 $this->journal->append('receive.role_mail', new ChangeContext('system', 'mr:import'), (int) $project['customer_id'], (int) $project['id'], [

@@ -74,7 +74,8 @@ def summary(raw):
     }
 
 
-def received_header(client_name, client_ip, helo, by_host, queue_id, rcpt, tls_version, cipher, cipher_bits, when=None):
+def received_header(client_name, client_ip, helo, by_host, queue_id, rcpt, tls_version, cipher, cipher_bits, when=None,
+                    authenticated=False):
     """Received header in Postfix format. Postfix does not pass its own Received header to milters,
     but the analysis reads queue id and TLS (protocol, cipher) from the topmost Received header."""
     import time as _time
@@ -84,7 +85,8 @@ def received_header(client_name, client_ip, helo, by_host, queue_id, rcpt, tls_v
         bits = f" ({cipher_bits}/{cipher_bits} bits)" if cipher_bits else ""
         lines.append(f"\t(using {tls_version} with cipher {cipher or 'unknown'}{bits})")
         lines.append("\t(No client certificate requested)")
-    lines.append(f"\tby {by_host} (Postfix) with {'ESMTPS' if tls_version else 'ESMTP'} id {queue_id}")
+    proto = ("ESMTPS" if tls_version else "ESMTP") + ("A" if authenticated else "")   # RFC 3848
+    lines.append(f"\tby {by_host} (Postfix) with {proto} id {queue_id}")
     stamp = _time.strftime("%a, %d %b %Y %H:%M:%S +0000 (UTC)", _time.gmtime(when))
     lines.append(f"\tfor <{rcpt}>; {stamp}")
     return ("\r\n".join(lines) + "\r\n").encode("utf-8", "replace")

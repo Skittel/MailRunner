@@ -2,6 +2,25 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
+## 0.1.32 - 2026-11-05
+- SMTP AUTH for customers: `GET|POST /v1/smtp-credentials`, `PATCH|DELETE /v1/smtp-credentials/{id}`,
+  `POST .../rotate` (profile checked_auth; password generated, shown once; rotation grace up to 7 days).
+  Mail sent with such a login on port 25 (after STARTTLS, or without TLS if `plaintext_port25`), 587 (STARTTLS)
+  or 465 (TLS) is stored in the credential's project like MX mail, for any recipient, without recipient checks;
+  nothing is relayed. Messages show `received_via: auth` and `auth.credential_id`/`service`; journal
+  `receive.received` names the credential; `last_used_at` is set on import.
+- `mr-auth` (`mailrunner-auth.service`): Dovecot auth protocol for Postfix on 127.0.0.1:8897, PLAIN and LOGIN,
+  Argon2id from the generated `credentials.json`, TLS rule, allowed networks, rotation grace; 5 failures in
+  10 min block a client address for 15 min; failures logged without password.
+- Postfix: master.cf services `submission` (587) and `smtps` (465), AUTH only; port 25 offers AUTH after
+  STARTTLS, without TLS only while a credential allows it (`smtpd_tls_auth_only` from the generated
+  `postfix.conf`, set by `mr:apply`). mr-milter maps the login to the project (`{auth_authen}`, `{daemon_name}`)
+  and writes `ESMTPSA` in its Received header.
+- A revoked credential frees its username; usernames must not start with `mrc_`.
+- Self test: project `system/selftest-auth` with credential and token (install.sh, also on existing nodes);
+  checks `submission.587`, `submission.465`, `submission.port25`, `submission.api` and service mailrunner-auth.
+- Migration: `receive_messages.received_via`, `auth_credential_id`, `smtp_service`.
+
 ## 0.1.31 - 2026-11-04
 - Webhook: parallel `PUT /v1/webhook` of one project are serialised (project row lock); two simultaneous first
   PUTs made one fail with HTTP 500 (duplicate key). Same for `DELETE`.

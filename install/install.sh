@@ -236,16 +236,43 @@ log "Postfix configuration"
 [[ -f /etc/postfix/master.cf.orig-mailrunner ]] || cp -a /etc/postfix/master.cf /etc/postfix/master.cf.orig-mailrunner
 render "$T/receive/postfix-main.cf" > /etc/postfix/main.cf
 sed -i '/^# --- MailRunner receive role/,$d' /etc/postfix/master.cf   # old pipe transport (<= 0.0.6)
+sed -i '/^# --- MailRunner submission/,$d' /etc/postfix/master.cf
+cat >> /etc/postfix/master.cf <<'MASTER'
+# --- MailRunner submission (install.sh; everything below this line is rewritten on every install)
+# SMTP AUTH only (customer SMTP credentials, mr-auth): 587 with STARTTLS, 465 with TLS from the start.
+# Authenticated mail goes to the credential's project (mr-milter); nothing is relayed.
+submission inet n       -       n       -       -       smtpd
+  -o syslog_name=postfix/submission
+  -o smtpd_tls_security_level=encrypt
+  -o smtpd_tls_auth_only=yes
+  -o smtpd_sasl_service=submission
+  -o milter_macro_daemon_name=submission
+  -o smtpd_client_restrictions=
+  -o smtpd_helo_restrictions=
+  -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_recipient_restrictions=reject_non_fqdn_recipient,permit_sasl_authenticated,reject
+smtps     inet  n       -       n       -       -       smtpd
+  -o syslog_name=postfix/smtps
+  -o smtpd_tls_wrappermode=yes
+  -o smtpd_tls_security_level=encrypt
+  -o smtpd_tls_auth_only=yes
+  -o smtpd_sasl_service=smtps
+  -o milter_macro_daemon_name=smtps
+  -o smtpd_client_restrictions=
+  -o smtpd_helo_restrictions=
+  -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_recipient_restrictions=reject_non_fqdn_recipient,permit_sasl_authenticated,reject
+MASTER
 log "Database migrations, node key, mail path configuration"
 runuser -u mailrunner -- php /opt/mailrunner/current/spark migrate --all
 php /opt/mailrunner/current/spark mr:node:init
 php /opt/mailrunner/current/spark mr:apply --no-reload
 
-log "Milter"
-install -m 0644 "$T/systemd/mailrunner-milter.service" /etc/systemd/system/
+log "Milter and SMTP AUTH"
+install -m 0644 "$T/systemd/mailrunner-milter.service" "$T/systemd/mailrunner-auth.service" /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable mailrunner-milter >/dev/null 2>&1
-systemctl restart mailrunner-milter
+systemctl enable mailrunner-milter mailrunner-auth >/dev/null 2>&1
+systemctl restart mailrunner-milter mailrunner-auth
 
 log "Start Postfix"
 
@@ -308,6 +335,20 @@ if [[ ! -s /etc/mailrunner/selftest.env ]]; then
         echo "SELFTEST_OTHER_TOKEN=$(tok system/selftest-isolation)"; } > /etc/mailrunner/selftest.env )
     chown root:mailrunner /etc/mailrunner/selftest.env
     chmod 0640 /etc/mailrunner/selftest.env
+fi
+# SMTP AUTH self test (0.1.32): own project, credential and token, added to existing nodes too
+if ! "${SPARK[@]}" mr:project:show system/selftest-auth >/dev/null 2>&1; then
+    "${SPARK[@]}" mr:project:create system/selftest-auth --profile=checked_auth --name="Self test: SMTP AUTH" >/dev/null
+    "${SPARK[@]}" mr:project:set system/selftest-auth --delete-after-ack-hours=0 --unacked-days=1 --metadata-days=2 >/dev/null
+fi
+if ! grep -q '^SELFTEST_SMTP_PASSWORD=' /etc/mailrunner/selftest.env; then
+    json() { sed -n '/^{/,$p' | python3 -c "import sys,json;print(json.load(sys.stdin)[\"$1\"])"; }
+    CRED="$("${SPARK[@]}" mr:credential:create system/selftest-auth selftest.auth --label="selftest" --json)"
+    ( umask 027
+      { echo "SELFTEST_SMTP_USER=selftest.auth"
+        echo "SELFTEST_SMTP_PASSWORD=$(echo "$CRED" | json password)"
+        echo "SELFTEST_AUTH_TOKEN=$("${SPARK[@]}" mr:token:create system/selftest-auth --label="selftest" --json | json bearer)"; } >> /etc/mailrunner/selftest.env )
+    unset CRED
 fi
 php /opt/mailrunner/current/spark mr:apply >/dev/null
 systemctl enable --now mailrunner-selftest.timer >/dev/null 2>&1

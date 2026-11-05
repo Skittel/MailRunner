@@ -1,0 +1,22 @@
+[Unit]
+Description=MailRunner: SMTP AUTH for Postfix (customer SMTP credentials)
+After=network-online.target
+Wants=network-online.target
+Before=postfix.service
+
+[Service]
+Type=simple
+User=mailrunner
+Group=mailrunner
+ExecStart=/opt/mailrunner/current/mailpath/receive/bin/mr-auth
+Restart=always
+RestartSec=2
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+# reads /etc/mailrunner/generated/current/credentials.json only
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

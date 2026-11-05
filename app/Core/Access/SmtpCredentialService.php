@@ -54,6 +54,8 @@ class SmtpCredentialService
             if ($project['profile'] !== 'checked_auth') {
                 throw new ConfigException('PROFILE_NO_SMTP_AUTH', 'Project "' . $ref . '" has profile "' . $project['profile'] . '"; SMTP credentials need profile checked_auth');
             }
+            // a revoked credential frees its username (its history stays in the journal)
+            $this->db->table('smtp_credentials')->where('username', $username)->where('revoked_at IS NOT NULL')->delete();
             if ($this->db->table('smtp_credentials')->where('username', $username)->countAllResults() > 0) {
                 throw new ConfigException('USERNAME_EXISTS', 'SMTP username "' . $username . '" already exists on this node');
             }
@@ -217,8 +219,8 @@ class SmtpCredentialService
     private static function normalizeUsername(string $username): string
     {
         $username = strtolower(trim($username));
-        if (preg_match('/^[a-z0-9][a-z0-9._@+-]{2,99}$/', $username) !== 1) {
-            throw new ConfigException('INVALID_USERNAME', 'Username must be 3-100 chars: a-z, 0-9, . _ @ + -');
+        if (preg_match('/^[a-z0-9][a-z0-9._@+-]{2,99}$/', $username) !== 1 || str_starts_with($username, self::ID_PREFIX . '_')) {
+            throw new ConfigException('INVALID_USERNAME', 'Username must be 3-100 chars: a-z, 0-9, . _ @ + -, not starting with "' . self::ID_PREFIX . '_"');
         }
 
         return $username;

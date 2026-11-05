@@ -1,0 +1,112 @@
+#!/usr/bin/python3 -I
+"""mr-auth - SMTP AUTH for Postfix (Dovecot auth protocol on 127.0.0.1:8897), see mailrunner_rx/auth.py.
+
+Runs as systemd service mailrunner-auth (user mailrunner). Postfix: smtpd_sasl_type = dovecot,
+smtpd_sasl_path = inet:127.0.0.1:8897.
+"""
+import asyncio
+import os
+import secrets
+import sys
+import syslog
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
+
+from mailrunner_rx import auth, config  # noqa: E402
+
+LISTEN = os.environ.get("MR_AUTH_LISTEN", "127.0.0.1:8897")
+CREDENTIALS = auth.Credentials(os.path.join(config.CONFIG_DIR, "generated", "current", "credentials.json"))
+LIMITER = auth.Limiter()
+VERIFY = asyncio.Semaphore(4)   # Argon2id needs 64 MiB per check: bound memory and CPU
+FAIL_DELAY = 1.0
+CUID = 0
+
+
+def log(level, text):
+    syslog.syslog(level, text)
+
+
+async def login(username, password, params):
+    ip = params.get("rip", "")
+    service = params.get("service", "?")
+    secured = "secured" in params
+    if LIMITER.is_blocked(ip):
+        reason = "client blocked after repeated failures"
+    else:
+        entry = CREDENTIALS.get(username)
+        async with VERIFY:
+            reason = await asyncio.get_running_loop().run_in_executor(None, auth.check_login, entry, password, secured, ip)
+        if reason is None:
+            LIMITER.succeeded(ip)
+            log(syslog.LOG_INFO, f"auth ok user=<{username}> credential={entry['credential_id']} project={entry['project']} "
+                                 f"rip={ip} service={service} tls={'yes' if secured else 'no'}")
+            return True
+        LIMITER.failed(ip)
+    log(syslog.LOG_WARNING, f"auth failed user=<{username[:100]}> rip={ip} service={service} "
+                            f"tls={'yes' if secured else 'no'} reason={reason}")
+    await asyncio.sleep(FAIL_DELAY)
+    return False
+
+
+async def handle(reader, writer):
+    global CUID
+    CUID += 1
+    writer.write(auth.handshake(os.getpid(), CUID, secrets.token_hex(16)).encode())
+    await writer.drain()
+    pending = {}   # id -> {"mech", "params", "user"}
+
+    async def answer(rid, ok, user):
+        u = auth.escape(user or "")
+        writer.write((f"OK\t{rid}\tuser={u}\n" if ok else f"FAIL\t{rid}\tuser={u}\n").encode())
+        await writer.drain()
+
+    try:
+        while line := await reader.readline():
+            fields = line.decode("utf-8", "replace").rstrip("\n").split("\t")
+            cmd = fields[0]
+            if cmd == "AUTH" and len(fields) >= 3:
+                rid, mech, params = auth.parse_auth(fields)
+                if mech == "PLAIN":
+                    if isinstance(params.get("resp"), str):
+                        creds = auth.decode_plain(params["resp"])
+                        await answer(rid, bool(creds) and await login(creds[0], creds[1], params), creds[0] if creds else "")
+                    else:
+                        pending[rid] = {"mech": "PLAIN", "params": params}
+                        writer.write(f"CONT\t{rid}\t\n".encode())
+                elif mech == "LOGIN":
+                    pending[rid] = {"mech": "LOGIN", "params": params, "user": None}
+                    writer.write(f"CONT\t{rid}\t{auth.b64('Username:')}\n".encode())
+                else:
+                    writer.write(f"FAIL\t{rid}\treason=unsupported mechanism\n".encode())
+            elif cmd == "CONT" and len(fields) >= 3 and fields[1] in pending:
+                rid, data, st = fields[1], fields[2], pending[fields[1]]
+                if st["mech"] == "PLAIN":
+                    del pending[rid]
+                    creds = auth.decode_plain(data)
+                    await answer(rid, bool(creds) and await login(creds[0], creds[1], st["params"]), creds[0] if creds else "")
+                elif st["user"] is None:
+                    st["user"] = auth.unb64(data) or ""
+                    writer.write(f"CONT\t{rid}\t{auth.b64('Password:')}\n".encode())
+                else:
+                    del pending[rid]
+                    password = auth.unb64(data)
+                    await answer(rid, password is not None and await login(st["user"], password, st["params"]), st["user"])
+            # VERSION, CPID and unknown lines from the client need no answer
+            await writer.drain()
+    except (ConnectionError, asyncio.IncompleteReadError):
+        pass
+    finally:
+        writer.close()
+
+
+async def main():
+    host, port = LISTEN.rsplit(":", 1)
+    server = await asyncio.start_server(handle, host, int(port), limit=65536)
+    log(syslog.LOG_INFO, f"listening on {LISTEN}")
+    async with server:
+        await server.serve_forever()
+
+
+if __name__ == "__main__":
+    syslog.openlog("mr-auth", syslog.LOG_PID, syslog.LOG_MAIL)
+    asyncio.run(main())

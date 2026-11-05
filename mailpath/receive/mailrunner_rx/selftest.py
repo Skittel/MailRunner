@@ -39,7 +39,7 @@ ZONE = "selftest.test"
 RCPT_DOMAIN = f"rx.{ZONE}"
 HELO = f"client.{ZONE}"
 SELFTEST_ENV = os.path.join(config.CONFIG_DIR, "selftest.env")
-SERVICES = ["postfix", "mailrunner-milter", "mailrunner-smtplog", "unbound", "nginx", "mariadb"]
+SERVICES = ["postfix", "mailrunner-milter", "mailrunner-auth", "mailrunner-smtplog", "unbound", "nginx", "mariadb"]
 DEBUG_SECTIONS = ["smtp", "header", "spf", "dkim", "dmarc", "arc", "return_path_dns", "fcrdns", "helo",
                   "ip_protocol", "dnsbl", "domain_security", "dns_analysis", "smime"]
 WARN_250_S, FAIL_250_S = 15, 60
@@ -648,6 +648,136 @@ def api_checks(run, items, times, subject, journal_after):
             f"{len(overdue)} acked > 30 min ago still with content" if overdue else "content deleted after ack")
 
 
+
+# --------------------------------------------------------------------------- smtp auth (customer SMTP credentials)
+class _SmtpsByName(smtplib.SMTP_SSL):
+    """SMTP over TLS from the start, connected by address but checking the certificate for the host name."""
+
+    def __init__(self, server_name, **kw):
+        self.server_name = server_name
+        super().__init__(context=ssl.create_default_context(), **kw)
+
+    def _get_socket(self, host, port, timeout):
+        sock = socket.create_connection((host, port), timeout)
+        return self.context.wrap_socket(sock, server_hostname=self.server_name)
+
+
+def _auth_mail(user, tag, port):
+    return (f"From: {user}@client.{ZONE}\r\nTo: anyone-{tag}@unrouted.invalid\r\nSubject: MailRunner self test auth {tag} {port}\r\n"
+            f"Message-ID: <auth-{tag}-{port}@client.{ZONE}>\r\n\r\nSMTP AUTH self test via port {port}.\r\n").encode()
+
+
+def submission_checks(run, env=None):
+    """SMTP AUTH with the self test credential: 587 (STARTTLS) and 465 (TLS) deliver to any recipient into
+    system/selftest-auth, AUTH needs TLS (587 offers none before STARTTLS, port 25 refuses the credential without
+    TLS), a wrong password and an unauthenticated sender are refused, the mails are collectable via the API."""
+    env = env if env is not None else load_env(SELFTEST_ENV)
+    user, password, token = env.get("SELFTEST_SMTP_USER"), env.get("SELFTEST_SMTP_PASSWORD"), env.get("SELFTEST_AUTH_TOKEN")
+    if not (user and password and token):
+        run.add("submission", "submission.config", "fail", f"SELFTEST_SMTP_USER/PASSWORD/AUTH_TOKEN missing in {SELFTEST_ENV}")
+        return
+    v4 = (own_addresses(run.hostname).get(4) or [None])[0]
+    if v4 is None:
+        run.add("submission", "submission.config", "fail", f"no A record for {run.hostname}")
+        return
+    tag = pysecrets.token_hex(4)
+    sent = {}
+
+    def deliver(s, port):
+        t = time.monotonic()
+        s.sendmail(f"{user}@client.{ZONE}", [f"anyone-{tag}@unrouted.invalid"], _auth_mail(user, tag, port))
+        sent[f"MailRunner self test auth {tag} {port}"] = port
+        return time.monotonic() - t
+
+    def p587():
+        s = smtplib.SMTP(timeout=FAIL_250_S + 30)
+        s.connect(v4, 587)
+        s._host = run.hostname
+        s.ehlo(HELO)
+        if s.has_extn("auth"):
+            s.quit()
+            return "fail", "AUTH offered before STARTTLS"
+        s.starttls(context=ssl.create_default_context())
+        s.ehlo(HELO)
+        s.mail(f"nobody@client.{ZONE}")
+        code, _ = s.rcpt(f"anyone-{tag}@unrouted.invalid")
+        s.rset()
+        if code < 500:
+            s.quit()
+            return "fail", f"recipient accepted without AUTH ({code})"
+        try:
+            s.login(user, password + "x")
+            s.quit()
+            return "fail", "wrong password accepted"
+        except smtplib.SMTPAuthenticationError:
+            pass
+        s.login(user, password)
+        dt = deliver(s, 587)
+        s.quit()
+        return "ok", f"STARTTLS, no AUTH before TLS, no relay without AUTH, wrong password 535, mail to any recipient 250 in {dt:.1f} s"
+
+    def p465():
+        s = _SmtpsByName(run.hostname, timeout=FAIL_250_S + 30)
+        s.connect(v4, 465)
+        s.ehlo(HELO)
+        version = s.sock.version()
+        s.login(user, password)
+        dt = deliver(s, 465)
+        s.quit()
+        return "ok", f"{version}, mail to any recipient 250 in {dt:.1f} s"
+
+    def p25():
+        s = smtplib.SMTP(timeout=30)
+        s.connect(v4, 25)
+        s.ehlo(HELO)
+        plain = "AUTH offered without TLS" if s.has_extn("auth") else "no AUTH without TLS"
+        if s.has_extn("auth"):
+            try:
+                s.login(user, password)
+                s.quit()
+                return "fail", "credential without plaintext permission logged in without TLS"
+            except smtplib.SMTPAuthenticationError:
+                plain += ", refused for this credential"
+        s.quit()
+        s = smtplib.SMTP(timeout=30)
+        s.connect(v4, 25)
+        s._host = run.hostname
+        s.ehlo(HELO)
+        s.starttls(context=ssl.create_default_context())
+        s.ehlo(HELO)
+        s.login(user, password)
+        s.quit()
+        return "ok", f"{plain}; login after STARTTLS ok"
+
+    for name, fn in (("submission.587", p587), ("submission.465", p465), ("submission.port25", p25)):
+        t0 = time.monotonic()
+        try:
+            status, detail = fn()
+        except Exception as e:
+            status, detail = "fail", f"{e.__class__.__name__}: {e}"
+        run.add("submission", name, status, detail, (time.monotonic() - t0) * 1000)
+
+    if not sent:
+        return
+    api = Api(run.hostname, token)
+    found = {}
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < 60 and len(found) < len(sent):
+        status, body = api.call("messages?acked=0&limit=1000")
+        if status != 200:
+            break
+        for m in body.get("data", []):
+            subject = (m.get("header") or {}).get("subject") or ""
+            if subject in sent:
+                found[subject] = m
+        if len(found) < len(sent):
+            time.sleep(2)
+    bad = [m["message_id"] for m in found.values() if m.get("received_via") != "auth" or not (m.get("auth") or {}).get("credential_id")]
+    run.add("submission", "submission.api", "ok" if len(found) == len(sent) and not bad else "fail",
+            f"{len(found)}/{len(sent)} collectable with received_via=auth" + (f", wrong marking: {bad}" if bad else ""))
+    if found:
+        api.call("messages/ack", {"message_ids": [m["message_id"] for m in found.values()]})
+
 # --------------------------------------------------------------------------- main
 def run_all(hostname, journal_after=0, skip_mail=False, mx_names=""):
     run = Run(hostname)
@@ -664,4 +794,5 @@ def run_all(hostname, journal_after=0, skip_mail=False, mx_names=""):
     items, subject = scenarios(run)
     times = smtp_checks(run, items)
     api_checks(run, items, times, subject, journal_after)
+    submission_checks(run)
     return run.result()

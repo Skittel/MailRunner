@@ -7,6 +7,9 @@ At end of data the milter stores the message encrypted, runs the analysis for ev
   451  temporary problem or analysis over the time limit (profiles checked/checked_auth)
 Profile "analysis" keeps no raw mail: only the analysis file and the database metadata.
 
+SMTP AUTH (ports 25/587/465, login checked by mr-auth): the login decides the project, there is no recipient
+check; the mail is stored like MX mail with received_via=auth and the credential id.
+
 Runs as systemd service mailrunner-milter (user mailrunner). Postfix: smtpd_milters, milter_default_action = tempfail.
 """
 import email
@@ -22,7 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..
 
 import Milter  # noqa: E402
 
-from mailrunner_rx import analyzer, config, crypto, message, secrets, store  # noqa: E402
+from mailrunner_rx import analyzer, auth, config, crypto, message, secrets, store  # noqa: E402
 from mailrunner_rx.routes import Routes  # noqa: E402
 
 
@@ -46,6 +49,7 @@ class RouteCache:
 
 
 ROUTES = RouteCache()
+CREDENTIALS = auth.Credentials(os.path.join(config.CONFIG_DIR, "generated", "current", "credentials.json"))
 
 
 def log(level, text):
@@ -78,6 +82,7 @@ class ReceiveMilter(Milter.Base):
         self.client_port = 0
         self.client_name = ""
         self.helo = ""
+        self.service = ""
         self.reset()
 
     def reset(self):
@@ -88,6 +93,7 @@ class ReceiveMilter(Milter.Base):
         self.headers = []
         self.body_chunks = []
         self.size = 0
+        self.auth = None        # credential entry of an authenticated session
 
     # Ask Postfix for headers with their original leading space (exact raw rebuild for DKIM).
     def negotiate(self, opts):
@@ -105,6 +111,7 @@ class ReceiveMilter(Milter.Base):
             self.client_ip = hostaddr[0]
             self.client_port = hostaddr[1] if len(hostaddr) > 1 else 0
         self.client_name = hostname or ""
+        self.service = self.getsymval("{daemon_name}") or ""   # master.cf: milter_macro_daemon_name per service
         return Milter.CONTINUE
 
     def session_log(self, event, text):
@@ -121,11 +128,24 @@ class ReceiveMilter(Milter.Base):
         self.mail_from = strip_brackets(mailfrom)
         self.tls = (self.getsymval("{tls_version}"), self.getsymval("{cipher}"), self.getsymval("{cipher_bits}"))
         self.by_host = self.getsymval("j") or socket.getfqdn()
-        self.session_log("mail", f"from=<{log_safe(self.mail_from)}>")
+        login = self.getsymval("{auth_authen}")
+        if login:
+            self.auth = CREDENTIALS.get(login)
+            if self.auth is None:   # revoked between AUTH and MAIL FROM
+                self.setreply("454", "4.7.0", "Login no longer valid")
+                return Milter.TEMPFAIL
+        self.session_log("mail", f"from=<{log_safe(self.mail_from)}>" + (f" auth={self.auth['credential_id']}" if self.auth else ""))
         return Milter.CONTINUE
 
     def envrcpt(self, to, *params):
         addr = strip_brackets(to)
+        if self.auth is not None:
+            # SMTP AUTH: the login decides the project, no recipient check (Postfix: permit_sasl_authenticated)
+            route = {"project_id": self.auth["project_id"], "project": self.auth["project"], "profile": self.auth["profile"], "role": None}
+            self.project_id = route["project_id"]
+            self.recipients.append((addr, route))
+            self.session_log("rcpt", f"to=<{log_safe(addr)}> result=accepted auth={self.auth['credential_id']}")
+            return Milter.CONTINUE
         route = ROUTES.get().lookup(addr)
         if route is None:
             self.setreply("450", "4.1.1", "Recipient not available, try again later")
@@ -156,7 +176,7 @@ class ReceiveMilter(Milter.Base):
         try:
             received = message.received_header(self.client_name, self.client_ip, self.helo, self.by_host, queue_id,
                                                self.recipients[0][0] if len(self.recipients) == 1 else "",
-                                               *self.tls)
+                                               *self.tls, authenticated=self.auth is not None)
             if len(self.recipients) != 1:
                 received = received.replace(b"\tfor <>; ", b"\t")
             raw = received + message.build_raw(self.headers, self.body_chunks)
@@ -213,6 +233,9 @@ class ReceiveMilter(Milter.Base):
                 "analysis_status": analysis_status,
                 "client_info": client_info((result.get("debug") or {}).get("ipregistry")),
                 "role": route.get("role"),
+                "received_via": "auth" if self.auth else "mx",
+                "auth_credential_id": self.auth["credential_id"] if self.auth else None,
+                "smtp_service": self.service or None,
                 "analysis_ms": round((time.monotonic() - started) * 1000),
             }
             # E-12: profile analysis keeps no raw mail; E-18: postmaster/abuse mail is always kept

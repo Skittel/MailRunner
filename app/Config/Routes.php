@@ -23,6 +23,11 @@ $routes->group('v1', ['filter' => 'bearer'], static function (RouteCollection $r
         $routes->get('webhook', '\App\Controllers\V1\Webhook::show');
         $routes->put('webhook', '\App\Controllers\V1\Webhook::put');
         $routes->delete('webhook', '\App\Controllers\V1\Webhook::delete');
+        $routes->get('smtp-credentials', '\App\Controllers\V1\SmtpCredentials::index');
+        $routes->post('smtp-credentials', '\App\Controllers\V1\SmtpCredentials::create');
+        $routes->patch('smtp-credentials/(:segment)', '\App\Controllers\V1\SmtpCredentials::update/$1');
+        $routes->post('smtp-credentials/(:segment)/rotate', '\App\Controllers\V1\SmtpCredentials::rotate/$1');
+        $routes->delete('smtp-credentials/(:segment)', '\App\Controllers\V1\SmtpCredentials::delete/$1');
     }
 });
 

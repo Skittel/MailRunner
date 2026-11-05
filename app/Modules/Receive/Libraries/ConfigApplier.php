@@ -55,6 +55,12 @@ class ConfigApplier
             $messages[] = 'Config ' . $hash . ' already active';
         }
 
+        $postconf = $this->applyPostconf($files['postfix.conf'] ?? '');
+        if ($postconf !== []) {
+            $messages[] = 'Postfix main.cf: ' . implode(', ', $postconf);
+            $changed    = true; // smtpd reads main.cf only on reload
+        }
+
         $reloaded = false;
         if ($reload && $changed) {
             [$reloaded, $msg] = $this->reloadPostfix();
@@ -63,6 +69,35 @@ class ConfigApplier
         $this->cleanup([$hash, is_link($this->generatedDir . '/previous') ? (string) readlink($this->generatedDir . '/previous') : '']);
 
         return ['hash' => $hash, 'changed' => $changed, 'reloaded' => $reloaded, 'messages' => $messages];
+    }
+
+    /**
+     * Settings from the generated postfix.conf ("name = value" lines, a fixed allow list) are written to main.cf
+     * with postconf when they differ (root only). install.sh renders main.cf and runs mr:apply afterwards.
+     *
+     * @return list<string> changed settings
+     */
+    private function applyPostconf(string $content): array
+    {
+        if ($content === '' || ! is_executable('/usr/sbin/postconf') || (function_exists('posix_geteuid') && posix_geteuid() !== 0)) {
+            return [];
+        }
+        $changed = [];
+        foreach (explode("\n", $content) as $line) {
+            if (preg_match('/^(smtpd_tls_auth_only)\s*=\s*(yes|no)$/', trim($line), $m) !== 1) {
+                continue;
+            }
+            $now = trim((string) shell_exec('/usr/sbin/postconf -h ' . $m[1] . ' 2>/dev/null'));
+            if ($now !== $m[2]) {
+                exec('/usr/sbin/postconf -e ' . escapeshellarg($m[1] . '=' . $m[2]) . ' 2>&1', $out, $code);
+                if ($code !== 0) {
+                    throw new RuntimeException('postconf failed: ' . implode(' ', $out));
+                }
+                $changed[] = $m[1] . '=' . $m[2];
+            }
+        }
+
+        return $changed;
     }
 
     private function checkPcre(string $file): void

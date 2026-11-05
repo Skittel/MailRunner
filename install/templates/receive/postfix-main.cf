@@ -39,11 +39,29 @@ milter_default_action = tempfail
 milter_connect_timeout = 10s
 milter_command_timeout = 70s
 milter_content_timeout = 120s
+# {daemon_name} tells mr-milter the port: smtp (25) here, submission (587) / smtps (465) in master.cf
+milter_macro_daemon_name = smtp
+
+# SMTP AUTH (customer SMTP credentials): mr-auth checks the login (Dovecot auth protocol). An authenticated
+# client may name any recipient: mr-milter stores the mail in the credential's project and answers DISCARD,
+# so nothing is relayed. Port 25 offers AUTH only after STARTTLS, unless a credential allows plain text
+# (smtpd_tls_auth_only is set by "spark mr:apply" from the generated postfix.conf).
+smtpd_sasl_auth_enable = yes
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = inet:127.0.0.1:8897
+smtpd_sasl_security_options = noanonymous
+smtpd_sasl_tls_security_options = noanonymous
+smtpd_sasl_authenticated_header = no
+smtpd_tls_auth_only = yes
+# unknown recipients are rejected by the explicit reject_unlisted_recipient below (after permit_sasl_authenticated)
+smtpd_reject_unlisted_recipient = no
 
 smtpd_helo_required = yes
-smtpd_relay_restrictions = permit_mynetworks, reject_unauth_destination
+smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination
 smtpd_recipient_restrictions =
     reject_non_fqdn_recipient,
+    permit_sasl_authenticated,
+    reject_unlisted_recipient,
     check_recipient_access pcre:/etc/mailrunner/generated/current/recipient_access.pcre,
     permit
 smtpd_data_restrictions = reject_unauth_pipelining
