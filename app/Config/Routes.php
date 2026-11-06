@@ -29,6 +29,13 @@ $routes->group('v1', ['filter' => 'bearer'], static function (RouteCollection $r
         $routes->post('smtp-credentials/(:segment)/rotate', '\App\Controllers\V1\SmtpCredentials::rotate/$1');
         $routes->delete('smtp-credentials/(:segment)', '\App\Controllers\V1\SmtpCredentials::delete/$1');
     }
+    if (config('Mailrunner')->sendEnabled) { // send projects (E-27)
+        $routes->get('domains', '\App\Controllers\V1\SendDomains::index');
+        $routes->get('domains/(:segment)', '\App\Controllers\V1\SendDomains::show/$1');
+        $routes->put('domains/(:segment)', '\App\Controllers\V1\SendDomains::put/$1');
+        $routes->delete('domains/(:segment)', '\App\Controllers\V1\SendDomains::delete/$1');
+        $routes->post('dkim/generate', '\App\Controllers\V1\SendDomains::generate');
+    }
 });
 
 // Node admin API (decision E-19): mTLS with the MailRunner Admin CA, used by the admin GUI.

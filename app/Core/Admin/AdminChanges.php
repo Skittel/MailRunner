@@ -40,9 +40,12 @@ class AdminChanges
         $projects = service('projectService');
         $created  = false;
         $existing = $projects->find($ref);
+        $type     = (string) ($body['type'] ?? ($existing['type'] ?? 'receive'));
         if ($existing === null) {
-            $projects->create($ref, (string) ($body['profile'] ?? ''), (string) ($body['name'] ?? ''), $ctx);
+            $projects->create($ref, (string) ($body['profile'] ?? ''), (string) ($body['name'] ?? ''), $ctx, $type);
             $created = true;
+        } elseif ($type !== $existing['type']) {
+            throw new ConfigException('TYPE_IMMUTABLE', 'The type of an existing project (receive or send) cannot be changed');
         } elseif (isset($body['profile']) && $body['profile'] !== $existing['profile']) {
             throw new ConfigException('PROFILE_IMMUTABLE', 'The profile of an existing project cannot be changed');
         }
@@ -138,8 +141,8 @@ class AdminChanges
         } else {
             $p   = service('projectService')->find($ref);
             $now = $p === null ? [] : ProjectsApi::present($p, array_column(service('routeService')->list($ref), 'route'));
-            $now = $now === [] ? [] : ['profile' => $now['profile'], 'name' => $now['name'], 'enabled' => $now['enabled'], 'routes' => $now['routes']] + $now['settings'];
-            $want = array_intersect_key($body, ['profile' => 1, 'name' => 1, 'enabled' => 1, 'routes' => 1]) + (is_array($body['settings'] ?? null) ? $body['settings'] : []);
+            $now = $now === [] ? [] : ['type' => $now['type'], 'profile' => $now['profile'], 'name' => $now['name'], 'enabled' => $now['enabled'], 'routes' => $now['routes']] + $now['settings'];
+            $want = array_intersect_key($body, ['type' => 1, 'profile' => 1, 'name' => 1, 'enabled' => 1, 'routes' => 1]) + (is_array($body['settings'] ?? null) ? $body['settings'] : []);
         }
         $diff = [];
         foreach ($want as $field => $value) {

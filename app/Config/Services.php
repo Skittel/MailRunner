@@ -78,4 +78,13 @@ class Services extends BaseService
 
         return new \App\Core\Webhooks\WebhookService(db_connect(), static::journalWriter(), config('Mailrunner')->dataDir . '/webhook.request');
     }
+
+    public static function sendDomainService(bool $getShared = true): \App\Core\Send\SendDomainService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('sendDomainService');
+        }
+
+        return new \App\Core\Send\SendDomainService(db_connect(), static::journalWriter());
+    }
 }

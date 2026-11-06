@@ -41,6 +41,9 @@ class RouteService
 
         return Transaction::run($this->db, function () use ($ref, $wanted, $ctx): array {
             $project = $this->projects->getForChange($ref, $ctx);
+            if ($wanted !== [] && ($project['type'] ?? 'receive') !== 'receive') {
+                throw new ConfigException('PROJECT_TYPE', 'Project "' . $ref . '" is a send project; routes (receive domains) belong to receive projects');
+            }
 
             if ($wanted !== []) {
                 $conflicts = $this->db->table('receive_routes r')

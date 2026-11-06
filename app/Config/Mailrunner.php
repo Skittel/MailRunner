@@ -34,6 +34,19 @@ class Mailrunner extends BaseConfig
     public string $mxNames = '';
 
     /**
+     * Send role (E-27): HELO name of outgoing connections and the source addresses the delivery worker uses
+     * (space-separated). The self test checks that the addresses belong to the node, their PTR names the HELO name,
+     * the HELO name resolves to them and outgoing port 25 is open.
+     */
+    public string $sendHelo = '';
+
+    /** @var list<string> */
+    public array $sendIpv4 = [];
+
+    /** @var list<string> */
+    public array $sendIpv6 = [];
+
+    /**
      * What MailRunner Admin may do on this node (app.env), each "auto" (default) or "manual":
      *   adminUpdates  auto: a software update requested by the admin is installed at once (mailrunner-update unit);
      *                 manual: it is only noted, install with "sudo mailrunner mr:update".
@@ -68,6 +81,9 @@ class Mailrunner extends BaseConfig
         $this->dataDir        = rtrim((string) (env('MAILRUNNER_DATA_DIR') ?? $this->dataDir), '/');
         $this->smtpJournalDays = (int) (env('MAILRUNNER_SMTP_JOURNAL_DAYS') ?? $this->smtpJournalDays);
         $this->mxNames         = trim((string) (env('MAILRUNNER_MX_NAMES') ?? $this->mxNames));
+        $this->sendHelo        = strtolower(trim((string) (env('MAILRUNNER_SEND_HELO') ?? $this->sendHelo)));
+        $this->sendIpv4        = self::ipList(env('MAILRUNNER_SEND_IPV4'), FILTER_FLAG_IPV4) ?? $this->sendIpv4;
+        $this->sendIpv6        = self::ipList(env('MAILRUNNER_SEND_IPV6'), FILTER_FLAG_IPV6) ?? $this->sendIpv6;
         $this->adminUpdates    = env('MAILRUNNER_ADMIN_UPDATES') === 'manual' ? 'manual' : 'auto';
         $this->adminConfig     = env('MAILRUNNER_ADMIN_CONFIG') === 'manual' ? 'manual' : 'auto';
         $this->sourceDir       = rtrim((string) (env('MAILRUNNER_SOURCE_DIR') ?? $this->sourceDir), '/');
@@ -121,6 +137,16 @@ class Mailrunner extends BaseConfig
         }
 
         return $roles;
+    }
+
+    /** @return list<string>|null null = not set */
+    private static function ipList(mixed $value, int $flag): ?array
+    {
+        if ($value === null || $value === false) {
+            return null;
+        }
+
+        return array_values(array_filter(preg_split('/[\s,]+/', (string) $value) ?: [], static fn ($ip) => filter_var($ip, FILTER_VALIDATE_IP, $flag) !== false));
     }
 
     private function envBool(string $key, bool $default): bool

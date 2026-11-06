@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
-  title: MailRunner customer API (receive)
-  version: 0.1.35
+  title: MailRunner customer API (receive, send)
+  version: 0.2.0
   description: |
     Pull API of a MailRunner node. A client application collects the messages the node accepted
     for its project. A token belongs to exactly one project and only sees that project's data.
@@ -15,6 +15,10 @@ info:
 
     Messages that are not acknowledged stay in step 1 until they expire, so a client crash
     between steps 2 and 3 only causes a re-delivery. Deduplicate by `message_id`.
+
+    Send projects (type `send`, decision E-27, being built from 0.2.0): `/v1/domains` and `/v1/dkim/generate`.
+    A token of a receive project gets 409 PROJECT_TYPE there; the send endpoints exist only on nodes with the
+    send role.
 
     Human-readable documentation: https://wiki.skit.center/books/mailrunnerpub
   license:
@@ -327,6 +331,99 @@ paths:
       responses:
         '200': { description: OK, content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/SmtpCredential' }, password: { type: string } } } ] } } } }
         '404': { $ref: '#/components/responses/NotFound' }
+  /v1/domains:
+    get:
+      summary: Sender domains of the send project with their DKIM selector and the DNS record to publish
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/SendDomain' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/ProjectType' }
+  /v1/domains/{domain}:
+    parameters:
+      - { name: domain, in: path, required: true, schema: { type: string, example: shop.example } }
+    get:
+      summary: One sender domain
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/SendDomain' } } } ] } } } }
+        '404': { description: DOMAIN_NOT_FOUND, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { $ref: '#/components/responses/ProjectType' }
+    put:
+      summary: Set or replace the DKIM key of a domain (idempotent)
+      description: |
+        Without a domain entry with a valid DKIM key nothing is sent from that domain. The domain must be allowed
+        for the project (set by the node operator; subdomains of an allowed domain are included). The private key
+        is stored encrypted on the node and never returned. Use the same key on every node of the project.
+        RSA: unencrypted PEM, 1024-4096 bit (2048 recommended). ed25519 (RFC 8463): base64 of the 32-byte seed.
+        Setting the same selector and key again returns `changed: false`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [selector, private_key]
+              properties:
+                selector: { type: string, maxLength: 63, pattern: '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$', example: mr2611-k3a9 }
+                private_key: { type: string, description: 'RSA PEM or ed25519 base64 seed' }
+                algorithm: { type: string, enum: [rsa, ed25519], description: 'optional; derived from the key (PEM = rsa)' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/SendDomain' }, changed: { type: boolean } } } ] } } } }
+        '403': { description: DOMAIN_NOT_ALLOWED, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { $ref: '#/components/responses/ProjectType' }
+        '422': { description: 'INVALID_DOMAIN, INVALID_DKIM_SELECTOR, INVALID_DKIM_KEY, TOO_MANY_DOMAINS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      summary: Remove the domain and its key
+      responses:
+        '200': { description: 'OK, `deleted: false` if it did not exist' }
+        '409': { $ref: '#/components/responses/ProjectType' }
+  /v1/dkim/generate:
+    post:
+      summary: Generate a DKIM key pair (stores nothing)
+      description: |
+        Returns a new private key, a selector and the TXT record to publish. Nothing is stored: keep the key in
+        your application and set it with `PUT /v1/domains/{domain}` (on every node of the project). A TXT string
+        holds at most 255 characters; `value_parts` is the value split accordingly for zone files and DNS panels.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [domain]
+              properties:
+                domain: { type: string, example: shop.example }
+                algorithm: { type: string, enum: [rsa, ed25519], default: rsa }
+                bits: { type: integer, enum: [2048, 3072, 4096], default: 2048, description: 'rsa only' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          domain: { type: string }
+                          selector: { type: string, example: mr2611-k3a9 }
+                          algorithm: { type: string, enum: [rsa, ed25519] }
+                          bits: { type: integer }
+                          private_key: { type: string, description: 'shown only now' }
+                          dns: { $ref: '#/components/schemas/DkimDnsRecord' }
+        '409': { $ref: '#/components/responses/ProjectType' }
+        '422': { description: 'INVALID_DOMAIN, INVALID_DKIM_KEY (unknown algorithm or bits)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /v1/journal:
     get:
       summary: Events of the project, oldest first
@@ -421,6 +518,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    ProjectType:
+      description: The token's project is a receive project; send endpoints need a project of type send (code PROJECT_TYPE)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     NotFound:
       description: MESSAGE_NOT_FOUND, RAW_NOT_AVAILABLE or NOT_FOUND (unknown endpoint)
       content:
@@ -448,6 +550,28 @@ components:
         created_at: { type: string, format: date-time }
         last_used_at: { type: [string, 'null'], format: date-time, description: 'last mail imported with this login' }
         previous_password_valid_until: { type: [string, 'null'], format: date-time }
+    DkimDnsRecord:
+      type: object
+      properties:
+        name: { type: string, example: mr2611-k3a9._domainkey.shop.example }
+        type: { type: string, enum: [TXT] }
+        value: { type: string, example: 'v=DKIM1; k=rsa; p=MIIBIjANBgkqh...' }
+        value_parts: { type: array, items: { type: string, maxLength: 255 } }
+    SendDomain:
+      type: object
+      properties:
+        domain: { type: string }
+        dkim:
+          type: object
+          properties:
+            selector: { type: string }
+            algorithm: { type: string, enum: [rsa, ed25519] }
+            bits: { type: integer }
+            key_sha256: { type: string, description: 'SHA-256 of the public key; compare it across nodes' }
+        dns: { $ref: '#/components/schemas/DkimDnsRecord' }
+        allowed: { type: [boolean, 'null'], description: 'false if the operator no longer allows the domain for the project' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     Webhook:
       type: object
       nullable: true

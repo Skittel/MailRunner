@@ -18,7 +18,7 @@ set -euo pipefail
 # systemd units (mailrunner-update) have no HOME; composer refuses to run without it
 export HOME="${HOME:-/root}" COMPOSER_HOME="${COMPOSER_HOME:-${HOME:-/root}/.config/composer}"
 
-ROLE=""; NODE_ID=""; HOST=""; DB_NAME="mailrunner"; MX_NAMES=""; ADMIN_CA=""; LE_EMAIL=""; ADMIN_URL=""; ENROLL_TOKEN=""; SKIP_DNS=0
+ROLE=""; NODE_ID=""; HOST=""; DB_NAME="mailrunner"; MX_NAMES=""; SEND_HELO=""; SEND_IPV4=""; SEND_IPV6=""; SEND_SET=0; ADMIN_CA=""; LE_EMAIL=""; ADMIN_URL=""; ENROLL_TOKEN=""; SKIP_DNS=0
 SOURCE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 for arg in "$@"; do
     case "$arg" in
@@ -32,6 +32,9 @@ for arg in "$@"; do
         --le-email=*) LE_EMAIL="${arg#*=}" ;;   # contact for Let's Encrypt (optional)
         --admin-url=*) ADMIN_URL="${arg#*=}" ;; # MailRunner Admin, e.g. https://admin.example.net (enrollment)
         --enroll-token=*) ENROLL_TOKEN="${arg#*=}" ;; # one-time enrollment token from MailRunner Admin
+        --send-helo=*) SEND_HELO="${arg#*=}"; SEND_SET=1 ;;   # send role (E-27): HELO name of outgoing mail, enables send
+        --send-ipv4=*) SEND_IPV4="${arg#*=}"; SEND_SET=1 ;;   # source IPv4 address(es) of outgoing mail, comma-separated
+        --send-ipv6=*) SEND_IPV6="${arg#*=}"; SEND_SET=1 ;;   # source IPv6 address(es)
         --skip-dns-check) SKIP_DNS=1 ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
     esac
@@ -62,7 +65,7 @@ if [[ -n "$ENROLL_TOKEN" ]]; then
     ADMIN_CA="$ENROLL_CA"
     echo "node $NODE_ID, host $HOST${MX_NAMES:+, MX names: $MX_NAMES}"
 fi
-[[ "$ROLE" == "receive" ]] || die "--role=receive is required (send is not implemented yet)"
+[[ "$ROLE" == "receive" ]] || die "--role=receive is required (add the send role with --send-helo/--send-ipv4/--send-ipv6)"
 [[ "$NODE_ID" =~ ^[a-z0-9][a-z0-9.-]{1,62}$ ]] || die "--node-id is required, e.g. node1.eu"
 [[ "$HOST" =~ ^[a-z0-9.-]+\.[a-z]{2,}$ ]] || die "--hostname is required (FQDN)"
 [[ -f "$SOURCE/VERSION" ]] || die "source not found: $SOURCE"
@@ -173,6 +176,24 @@ if [[ -n "$MX_NAMES" ]]; then
     [[ "$MX_NAMES" =~ ^[a-z0-9.=46\ ,-]+$ ]] || die "--mx-names: invalid characters"
     sed -i '/^MAILRUNNER_MX_NAMES = /d' /etc/mailrunner/app.env
     echo "MAILRUNNER_MX_NAMES = \"$MX_NAMES\"" >> /etc/mailrunner/app.env
+fi
+# Send role (E-27): kept in app.env, so updates (install.sh without these options) leave it alone.
+if [[ "$SEND_SET" == 1 ]]; then
+    SEND_HELO="${SEND_HELO,,}"
+    [[ -z "$SEND_HELO" || "$SEND_HELO" =~ ^[a-z0-9.-]+\.[a-z]{2,}$ ]] || die "--send-helo: FQDN expected"
+    SEND_IPV4="$(echo "$SEND_IPV4" | tr ',' ' ' | xargs)"; SEND_IPV6="$(echo "$SEND_IPV6" | tr ',' ' ' | xargs)"
+    for ip in $SEND_IPV4; do [[ "$ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || die "--send-ipv4: invalid address"; done
+    for ip in $SEND_IPV6; do [[ "$ip" =~ ^[0-9a-fA-F:]+$ && "$ip" == *:* ]] || die "--send-ipv6: invalid address"; done
+    sed -i -e '/^MAILRUNNER_SEND_ENABLED = /d' -e '/^MAILRUNNER_SEND_HELO = /d' -e '/^MAILRUNNER_SEND_IPV4 = /d' -e '/^MAILRUNNER_SEND_IPV6 = /d' /etc/mailrunner/app.env
+    if [[ -n "$SEND_HELO" ]]; then
+        [[ -n "$SEND_IPV4$SEND_IPV6" ]] || die "--send-helo needs --send-ipv4 and/or --send-ipv6"
+        { echo "MAILRUNNER_SEND_ENABLED = true"; echo "MAILRUNNER_SEND_HELO = \"$SEND_HELO\""
+          echo "MAILRUNNER_SEND_IPV4 = \"$SEND_IPV4\""; echo "MAILRUNNER_SEND_IPV6 = \"$SEND_IPV6\""; } >> /etc/mailrunner/app.env
+        log "send role enabled (HELO $SEND_HELO)"
+    else
+        echo "MAILRUNNER_SEND_ENABLED = false" >> /etc/mailrunner/app.env   # --send-helo= (empty) switches it off
+        log "send role disabled"
+    fi
 fi
 
 if [[ ! -f /etc/mailrunner/secrets.env ]]; then

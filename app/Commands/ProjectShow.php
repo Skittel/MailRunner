@@ -26,11 +26,17 @@ class ProjectShow extends MrCommand
             return null;
         }
 
-        foreach (['name', 'profile', 'enabled', 'managed_by', 'revision', 'recipient_pattern', 'recipient_always_allow',
-            'delete_after_ack_hours', 'unacked_days', 'metadata_days', 'journal_scope', 'role_mail', 'role_mail_forward_to', 'updated_at'] as $field) {
+        $send = $project['type'] === 'send';
+        foreach ([...['type', 'name', 'profile', 'enabled', 'managed_by', 'revision'], ...($send
+            ? ['send_limit_hour', 'send_limit_day', 'send_allowed_domains', 'send_test_criteria', 'metadata_days', 'updated_at']
+            : ['recipient_pattern', 'recipient_always_allow', 'delete_after_ack_hours', 'unacked_days', 'metadata_days', 'journal_scope', 'role_mail', 'role_mail_forward_to', 'updated_at'])] as $field) {
             CLI::write(sprintf('%-24s %s', $field, $project[$field] ?? '-'));
         }
         CLI::newLine();
+        if ($send) {
+            CLI::write('Sender domains (DKIM)', 'yellow');
+            $this->outputTable(service('sendDomainService')->list((int) $project['id']), ['domain', 'dkim_selector', 'dkim_algorithm', 'dkim_bits', 'updated_at']);
+        }
         CLI::write('Routes', 'yellow');
         $this->outputTable($routes, ['route_type', 'route']);
         CLI::write('API tokens', 'yellow');

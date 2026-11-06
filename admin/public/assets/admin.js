@@ -17,3 +17,14 @@ document.addEventListener('click', function (e) {
         document.execCommand('copy'); done();
     }
 });
+
+// Project form: show the fields of the selected type (receive | send) while creating a project
+document.addEventListener('DOMContentLoaded', function () {
+    var sel = document.getElementById('project-type');
+    if (!sel) return;
+    var show = function () {
+        document.querySelectorAll('[data-type]').forEach(function (el) { el.hidden = el.dataset.type !== sel.value; });
+    };
+    sel.addEventListener('change', show);
+    show();
+});

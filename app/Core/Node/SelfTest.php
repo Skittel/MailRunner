@@ -53,7 +53,10 @@ class SelfTest
     /**
      * @return array<string, mixed> result of mr-selftest (status pass|fail|error)
      */
-    public function run(string $hostname, bool $baseOnly = false, string $mxNames = ''): array
+    /**
+     * @param array{helo?: string, ips?: list<string>}|null $send send role settings (E-27); null = send role off
+     */
+    public function run(string $hostname, bool $baseOnly = false, string $mxNames = '', ?array $send = null): array
     {
         $after = (int) ($this->db->query('SELECT COALESCE(MAX(id), 0) AS id FROM journal')->getRow('id'));
         $cmd   = [$this->script, '--hostname=' . $hostname, '--journal-after=' . $after];
@@ -62,6 +65,10 @@ class SelfTest
         }
         if ($mxNames !== '') {
             $cmd[] = '--mx-names=' . $mxNames;
+        }
+        if ($send !== null) {
+            $cmd[] = '--send-helo=' . ($send['helo'] ?? '');
+            $cmd[] = '--send-ips=' . implode(',', $send['ips'] ?? []);
         }
         $proc = proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
         if (! is_resource($proc)) {

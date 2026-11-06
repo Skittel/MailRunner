@@ -2,6 +2,25 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
+## 0.2.0 - 2026-11-06
+Send role, step 1 of 7 (decision E-27). Nothing is sent yet.
+- Project type `receive` | `send`, fixed at creation (`mr:project:create --type=send`, admin API `type`, refused
+  change: `TYPE_IMMUTABLE`). Existing projects are `receive`. A send project has profile `smarthost`, no routes,
+  no receive settings and no receive SMTP credentials; the receive mail path ignores it.
+- Send project settings (from MailRunner Admin, CLI `mr:project:set`): `send_limit_hour`, `send_limit_day`,
+  `send_allowed_domains` (null = all, subdomains included), `send_test_criteria` (spf, dkim, dmarc,
+  dmarc_policy, blacklist).
+- Customer API (nodes with the send role): `GET /v1/domains`, `GET|PUT|DELETE /v1/domains/{domain}` set the DKIM
+  key of a sender domain (RSA PEM 1024-4096 bit or ed25519 seed; stored encrypted with the node key, never
+  returned), `POST /v1/dkim/generate` returns key, selector and TXT record (split into 255-character parts) and
+  stores nothing. Journal `send.domain.updated|deleted` (selector, algorithm, key hash; never the key).
+- Node settings `MAILRUNNER_SEND_HELO`, `MAILRUNNER_SEND_IPV4`, `MAILRUNNER_SEND_IPV6` (installer
+  `--send-helo/--send-ipv4/--send-ipv6`, enables the send role). The admin API shows them under `send`.
+- Self test group `send` (send role only): configuration, HELO name resolves to every source address, every
+  address on the node with PTR = HELO name, outgoing port 25 (banner + EHLO at the SmartMailFlow test MX, no
+  mail). Details name no address. Secret scan ignores `*_HELO`, `*_IPV4`, `*_IPV6`.
+- Migration: `projects.type` and send settings, table `send_domains`.
+
 ## 0.1.35 - 2026-11-05
 - Database: transactions run with READ COMMITTED and retry deadlocks/conflicts (up to 3 times). MariaDB 11.8
   checks REPEATABLE READ snapshots strictly; an API ack while mails were imported failed with HTTP 500

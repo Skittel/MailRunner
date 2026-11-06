@@ -4,6 +4,12 @@ Admin and node are versioned separately since 0.1.26: `admin/VERSION` with tags 
 `VERSION` with tags `v*` (`CHANGELOG.md` in the repository root). An admin release only offers node updates when
 the node version in the same checkout is newer. Up to 0.1.25 both shared one version: see `../CHANGELOG.md`.
 
+## 0.1.29 - 2026-11-06
+- Projects have a type, chosen when creating and fixed afterwards: Empfang (receive) or Versand (send, decision
+  E-27). Send projects have no routes and no receive settings; instead mails per hour and per day for the whole
+  project, the allowed sender domains (or all domains) and the checkboxes for what the domain test must pass.
+  Pushed to the node as `type` and send settings; needs node 0.2.0 for send projects.
+
 ## 0.1.28 - 2026-11-04
 - Project page, card API-Tokens: shows the webhook the customer set over the node API (shortened URL, cooldown,
   last ping with HTTP code or error), per node during a move. Needs node 0.1.30.

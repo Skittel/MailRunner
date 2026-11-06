@@ -112,6 +112,34 @@ final class PagesTest extends CIUnitTestCase
         $this->assertNotNull($row['sync_error']); // node unreachable in tests
     }
 
+    public function testSendProjectWithLimitsDomainsAndCriteria(): void
+    {
+        $this->withSession($this->admin)->get('customers/cu5t-0001/projects/new')->assertSee('Versand (Smarthost)');
+        $r = $this->postAs('customers/cu5t-0001/projects', ['project_key' => 'mailer', 'node_id' => 'n0de-0001', 'type' => 'send',
+            'send_limit_hour' => '900', 'send_limit_day' => '100', 'send_allowed_domains' => '']);
+        $r->assertSee('Mehr pro Stunde als pro Tag');
+        $r->assertSee('Mindestens eine Domain');
+        $r = $this->postAs('customers/cu5t-0001/projects', ['project_key' => 'mailer', 'node_id' => 'n0de-0001', 'type' => 'send', 'profile' => 'analysis',
+            'routes' => 'ignored.example', 'send_limit_hour' => '100', 'send_limit_day' => '1000', 'send_allowed_domains' => "Shop.Example\nexample.org",
+            'criteria' => ['spf' => '1', 'dkim' => '1']]);
+        $r->assertRedirect();
+        $row = $this->db->table('projects')->where('project_key', 'mailer')->get()->getRowArray();
+        $this->assertSame(['send', 'smarthost', '[]'], [$row['type'], $row['profile'], $row['routes']]);
+        $this->assertSame(['send_limit_hour' => 100, 'send_limit_day' => 1000, 'send_allowed_domains' => ['example.org', 'shop.example'],
+            'send_test_criteria' => ['spf' => true, 'dkim' => true, 'dmarc' => false, 'dmarc_policy' => false, 'blacklist' => false]], json_decode($row['settings'], true));
+
+        // the type cannot be changed afterwards; "all domains" stores null
+        $pid = $row['public_id'];
+        $page = $this->withSession($this->admin)->get('projects/' . $pid);
+        $page->assertSee('Versand (Smarthost)');
+        $page->assertDontSee('name="type"');
+        $page->assertDontSee('name="routes"');
+        $this->postAs('projects/' . $pid, ['type' => 'receive', 'send_all_domains' => '1', 'send_allowed_domains' => 'x.example', 'enabled' => '1'])->assertRedirect();
+        $row = $this->db->table('projects')->where('project_key', 'mailer')->get()->getRowArray();
+        $this->assertSame('send', $row['type']);
+        $this->assertNull(json_decode($row['settings'], true)['send_allowed_domains']);
+    }
+
     public function testReadOnlyUserSeesButCannotChange(): void
     {
         $ro = ['access' => 'ro'] + $this->admin;

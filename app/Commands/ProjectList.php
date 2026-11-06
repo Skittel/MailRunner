@@ -17,7 +17,7 @@ class ProjectList extends MrCommand
         foreach ($rows as &$row) {
             $row['project'] = ProjectService::refOf($row);
         }
-        $this->json() ? $this->outputJson($rows) : $this->outputTable($rows, ['project', 'profile', 'enabled', 'managed_by', 'revision', 'updated_at']);
+        $this->json() ? $this->outputJson($rows) : $this->outputTable($rows, ['project', 'type', 'profile', 'enabled', 'managed_by', 'revision', 'updated_at']);
 
         return null;
     }

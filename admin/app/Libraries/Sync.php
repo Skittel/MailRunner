@@ -65,6 +65,7 @@ class Sync
             $client = $this->client($node);
             $client->ok('PUT', 'customers/' . $p['customer_key'], ['name' => $p['customer_name'], 'enabled' => (bool) $p['customer_enabled']]);
             $body = [
+                'type'     => $p['type'],
                 'profile'  => $p['profile'],
                 'name'     => $p['name'],
                 'enabled'  => $enabled ?? (bool) $p['enabled'],
@@ -198,7 +199,7 @@ class Sync
             }
             $db->table('projects')->insert([
                 'public_id' => PublicId::generate('projects'), 'customer_id' => $customerId, 'node_id' => $node['id'], 'project_key' => $p['project'], 'name' => $p['name'],
-                'profile' => $p['profile'], 'enabled' => $p['enabled'] ? 1 : 0, 'routes' => json_encode($p['routes']),
+                'type' => $p['type'] ?? 'receive', 'profile' => $p['profile'], 'enabled' => $p['enabled'] ? 1 : 0, 'routes' => json_encode($p['routes']),
                 'settings' => json_encode($p['settings']), 'changed_at' => $now, 'synced_at' => $now, 'node_revision' => $p['revision'], 'created_at' => $now,
             ]);
             $stats['projects']++;

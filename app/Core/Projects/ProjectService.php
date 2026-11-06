@@ -14,7 +14,25 @@ use CodeIgniter\Database\BaseConnection;
  */
 class ProjectService
 {
+    /** Receive profiles (E-05); a send project always has profile smarthost (E-27). */
     public const PROFILES = ['analysis', 'checked', 'checked_auth'];
+
+    /** Project type, fixed at creation (E-27): a project either receives or sends, never both. */
+    public const TYPES = ['receive', 'send'];
+
+    public const SEND_PROFILE = 'smarthost';
+
+    /** Domain test criteria a send project can require (admin checkboxes) and their defaults. */
+    public const TEST_CRITERIA = ['spf' => true, 'dkim' => true, 'dmarc' => true, 'dmarc_policy' => false, 'blacklist' => false];
+
+    public const MAX_SEND_LIMIT = 10_000_000;
+
+    /** Settings that only exist for send projects (set by MailRunner Admin). */
+    public const SEND_SETTINGS = ['send_limit_hour', 'send_limit_day', 'send_allowed_domains', 'send_test_criteria'];
+
+    /** Settings that only exist for receive projects. */
+    public const RECEIVE_SETTINGS = ['recipient_pattern', 'recipient_always_allow', 'delete_after_ack_hours', 'unacked_days',
+        'journal_scope', 'role_mail', 'role_mail_forward_to'];
 
     /**
      * Journal entries a project's token sees besides its own:
@@ -34,6 +52,7 @@ class ProjectService
         'name', 'enabled', 'recipient_pattern', 'recipient_always_allow',
         'delete_after_ack_hours', 'unacked_days', 'metadata_days', 'journal_scope',
         'role_mail', 'role_mail_forward_to',
+        'send_limit_hour', 'send_limit_day', 'send_allowed_domains', 'send_test_criteria',
     ];
 
     public function __construct(
@@ -46,14 +65,22 @@ class ProjectService
     /**
      * @return array<string, mixed>
      */
-    public function create(string $ref, string $profile, string $name, ChangeContext $ctx): array
+    public function create(string $ref, string $profile, string $name, ChangeContext $ctx, string $type = 'receive'): array
     {
         [$customerKey, $projectKey] = Keys::splitProjectRef($ref);
-        if (! in_array($profile, self::PROFILES, true)) {
+        if (! in_array($type, self::TYPES, true)) {
+            throw new ConfigException('INVALID_TYPE', 'Type must be one of: ' . implode(', ', self::TYPES));
+        }
+        if ($type === 'send') {
+            if ($profile !== '' && $profile !== self::SEND_PROFILE) {
+                throw new ConfigException('INVALID_PROFILE', 'A send project has profile ' . self::SEND_PROFILE);
+            }
+            $profile = self::SEND_PROFILE;
+        } elseif (! in_array($profile, self::PROFILES, true)) {
             throw new ConfigException('INVALID_PROFILE', 'Profile must be one of: ' . implode(', ', self::PROFILES));
         }
 
-        return Transaction::run($this->db, function () use ($ref, $customerKey, $projectKey, $profile, $name, $ctx): array {
+        return Transaction::run($this->db, function () use ($ref, $customerKey, $projectKey, $profile, $name, $ctx, $type): array {
             $customer = $this->customers->getByKey($customerKey);
             if ($this->find($ref) !== null) {
                 throw new ConfigException('PROJECT_EXISTS', 'Project "' . $ref . '" already exists');
@@ -62,6 +89,7 @@ class ProjectService
             $this->db->table('projects')->insert([
                 'customer_id' => $customer['id'],
                 'project_key' => $projectKey,
+                'type'        => $type,
                 'name'        => trim($name) !== '' ? trim($name) : $projectKey,
                 'profile'     => $profile,
                 'enabled'     => 1,
@@ -72,7 +100,7 @@ class ProjectService
             ]);
             $id = (int) $this->db->insertID();
             $this->journal->append('project.created', $ctx, (int) $customer['id'], $id, [
-                'project' => $ref, 'profile' => $profile, 'revision' => 1,
+                'project' => $ref, 'type' => $type, 'profile' => $profile, 'revision' => 1,
             ]);
 
             return $this->getById($id);
@@ -123,9 +151,28 @@ class ProjectService
         if (array_key_exists('journal_scope', $changes) && ! in_array($changes['journal_scope'], self::JOURNAL_SCOPES, true)) {
             throw new ConfigException('INVALID_SETTING', 'journal_scope must be one of: ' . implode(', ', self::JOURNAL_SCOPES));
         }
+        foreach (['send_limit_hour', 'send_limit_day'] as $field) {
+            if (array_key_exists($field, $changes) && $changes[$field] !== null) {
+                $value = filter_var($changes[$field], FILTER_VALIDATE_INT, ['options' => ['min_range' => 0, 'max_range' => self::MAX_SEND_LIMIT]]);
+                if ($value === false) {
+                    throw new ConfigException('INVALID_SETTING', $field . ' must be an integer 0-' . self::MAX_SEND_LIMIT . ' or null');
+                }
+                $changes[$field] = $value;
+            }
+        }
+        if (array_key_exists('send_allowed_domains', $changes)) {
+            $changes['send_allowed_domains'] = self::normalizeDomainList($changes['send_allowed_domains']);
+        }
+        if (array_key_exists('send_test_criteria', $changes)) {
+            $changes['send_test_criteria'] = self::normalizeCriteria($changes['send_test_criteria']);
+        }
 
         return Transaction::run($this->db, function () use ($ref, $changes, $ctx): array {
             $project = $this->getForChange($ref, $ctx);
+            $foreign = array_intersect(array_keys($changes), $project['type'] === 'send' ? self::RECEIVE_SETTINGS : self::SEND_SETTINGS);
+            if ($foreign !== []) {
+                throw new ConfigException('INVALID_SETTING', 'Not a setting of a ' . $project['type'] . ' project: ' . implode(', ', $foreign));
+            }
             $merged  = $changes + $project;
             if (($merged['role_mail'] ?? 'default') === 'forward' && empty($merged['role_mail_forward_to'])) {
                 throw new ConfigException('INVALID_SETTING', 'role_mail forward needs role_mail_forward_to');
@@ -133,7 +180,7 @@ class ProjectService
             // Only real changes count (the admin GUI always sends the full desired state).
             $changes = array_filter($changes, static function ($value, string $field) use ($project): bool {
                 $current = $project[$field] ?? null;
-                if ($field === 'recipient_always_allow') {
+                if (in_array($field, ['recipient_always_allow', 'send_allowed_domains', 'send_test_criteria'], true)) {
                     $current = is_string($current) ? json_decode($current, true) : $current;
 
                     return $value !== $current;
@@ -145,8 +192,10 @@ class ProjectService
             if ($ctx->source === 'admin' && $project['managed_by'] !== 'admin') {
                 $row['managed_by'] = 'admin'; // the admin GUI takes over a project created on the CLI
             }
-            if (array_key_exists('recipient_always_allow', $row)) {
-                $row['recipient_always_allow'] = $row['recipient_always_allow'] === null ? null : json_encode($row['recipient_always_allow']);
+            foreach (['recipient_always_allow', 'send_allowed_domains', 'send_test_criteria'] as $jsonField) {
+                if (array_key_exists($jsonField, $row)) {
+                    $row[$jsonField] = $row[$jsonField] === null ? null : json_encode($row[$jsonField]);
+                }
             }
             if ($row === []) {
                 return $this->getById((int) $project['id']); // nothing changed: no revision, no journal entry
@@ -263,6 +312,102 @@ class ProjectService
     public static function refOf(array $project): string
     {
         return $project['customer_key'] . '/' . $project['project_key'];
+    }
+
+    /**
+     * Test criteria of a send project: stored values over the defaults.
+     *
+     * @return array<string, bool>
+     */
+    public static function testCriteria(array $project): array
+    {
+        $stored = is_string($project['send_test_criteria'] ?? null) ? json_decode($project['send_test_criteria'], true) : ($project['send_test_criteria'] ?? null);
+
+        return array_merge(self::TEST_CRITERIA, is_array($stored) ? array_intersect_key($stored, self::TEST_CRITERIA) : []);
+    }
+
+    /**
+     * Allowed sender domains of a send project; null = all.
+     *
+     * @return list<string>|null
+     */
+    public static function allowedSendDomains(array $project): ?array
+    {
+        $v = $project['send_allowed_domains'] ?? null;
+
+        return is_string($v) ? json_decode($v, true) : $v;
+    }
+
+    /** A domain is allowed if the list is null (all) or it equals a listed domain or is a subdomain of one. */
+    public static function sendDomainAllowed(array $project, string $domain): bool
+    {
+        $list = self::allowedSendDomains($project);
+        if ($list === null) {
+            return true;
+        }
+        foreach ($list as $d) {
+            if ($domain === $d || str_ends_with($domain, '.' . $d)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static function isDomainName(string $domain): bool
+    {
+        return strlen($domain) <= 253 && preg_match('/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/', $domain) === 1;
+    }
+
+    /**
+     * @return list<string>|null
+     */
+    private static function normalizeDomainList(mixed $list): ?array
+    {
+        if ($list === null) {
+            return null; // all domains
+        }
+        if (! is_array($list)) {
+            throw new ConfigException('INVALID_SETTING', 'send_allowed_domains must be a list of domains or null (all)');
+        }
+        $out = [];
+        foreach ($list as $d) {
+            $d = strtolower(rtrim(trim((string) $d), '.'));
+            if ($d === '') {
+                continue;
+            }
+            if (! self::isDomainName($d)) {
+                throw new ConfigException('INVALID_SETTING', 'Invalid domain "' . $d . '" in send_allowed_domains');
+            }
+            $out[] = $d;
+        }
+        $out = array_values(array_unique($out));
+        sort($out);
+
+        return $out;
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    private static function normalizeCriteria(mixed $value): ?array
+    {
+        if ($value === null) {
+            return null; // defaults
+        }
+        if (! is_array($value)) {
+            throw new ConfigException('INVALID_SETTING', 'send_test_criteria must be an object');
+        }
+        $unknown = array_diff(array_keys($value), array_keys(self::TEST_CRITERIA));
+        if ($unknown !== []) {
+            throw new ConfigException('INVALID_SETTING', 'Unknown test criteria: ' . implode(', ', $unknown) . ' (known: ' . implode(', ', array_keys(self::TEST_CRITERIA)) . ')');
+        }
+        $out = [];
+        foreach (self::TEST_CRITERIA as $k => $default) {
+            $out[$k] = array_key_exists($k, $value) ? (bool) $value[$k] : $default;
+        }
+
+        return $out;
     }
 
     private static function normalizeRecipientPattern(mixed $pattern): ?string

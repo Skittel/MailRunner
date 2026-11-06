@@ -16,6 +16,17 @@ class Projects extends BaseController
     public const PROFILES      = ['analysis' => 'Analyse (alles annehmen, analysieren)', 'checked' => 'Geprüft', 'checked_auth' => 'Geprüft + SMTP-Anmeldung'];
     public const JOURNAL_SCOPE = ['own' => 'nur eigene', 'connections' => '+ Verbindungen ohne MAIL FROM', 'unassigned' => '+ alle ohne Projekt'];
     public const ROLE_MAIL     = ['default' => 'an den Betreiber (folgt)', 'api' => 'Abruf per API', 'forward' => 'Weiterleitung (folgt)'];
+    public const TYPES         = ['receive' => 'Empfang', 'send' => 'Versand (Smarthost)'];
+
+    /** Domain test criteria of send projects (node: ProjectService::TEST_CRITERIA); the customer does not see them. */
+    public const TEST_CRITERIA = [
+        'spf'          => ['SPF pass für jede ausgehende IP', true],
+        'dkim'         => ['DKIM pass', true],
+        'dmarc'        => ['DMARC pass mit Alignment', true],
+        'dmarc_policy' => ['DMARC-Richtlinie vorhanden (p=quarantine/reject)', false],
+        'blacklist'    => ['Ausgehende IPs auf keiner Blacklist', false],
+    ];
+    public const MAX_SEND_LIMIT = 10000000;
 
     private function sync(): Sync
     {
@@ -224,6 +235,10 @@ class Projects extends BaseController
     {
         $f      = $this->request->getPost();
         $errors = [];
+        $type   = $existing['type'] ?? (array_key_exists($f['type'] ?? '', self::TYPES) ? $f['type'] : 'receive');
+        if ($type === 'send') {
+            return $this->sendFromForm($f, $existing, $customerId);
+        }
         $routes = array_values(array_unique(array_filter(array_map(static fn ($l) => strtolower(trim($l)), preg_split('/[\s,]+/', (string) ($f['routes'] ?? '')) ?: []))));
         foreach ($routes as $r) {
             if (! preg_match('/^([a-z0-9._%+-]+@)?([a-z0-9-]+\.)+[a-z0-9-]{2,}$/', $r)) {
@@ -249,21 +264,81 @@ class Projects extends BaseController
         $row = ['name' => trim((string) ($f['name'] ?? '')), 'enabled' => ! empty($f['enabled']) ? 1 : 0,
             'routes' => json_encode($routes), 'settings' => json_encode($settings)];
         if ($existing === null) {
-            $row['project_key'] = (string) ($f['project_key'] ?? '');
-            $row['profile']     = array_key_exists($f['profile'] ?? '', self::PROFILES) ? $f['profile'] : 'analysis';
-            $row['node_id']     = (int) db_connect()->table('nodes')->select('id')->where('public_id', (string) ($f['node_id'] ?? ''))->get()->getRow('id');
-            if (! preg_match(Customers::KEY, $row['project_key'])) {
-                $errors['project_key'] = '3-40 Zeichen: a-z, 0-9, „-“';
-            } elseif (db_connect()->table('projects')->where('customer_id', $customerId)->where('project_key', $row['project_key'])->countAllResults() > 0) {
-                $errors['project_key'] = 'Dieses Projekt gibt es schon.';
-            }
-            if (db_connect()->table('nodes')->where('id', $row['node_id'])->countAllResults() === 0) {
-                $errors['node_id'] = 'Bitte eine Node wählen.';
-            }
+            $row['profile'] = array_key_exists($f['profile'] ?? '', self::PROFILES) ? $f['profile'] : 'analysis';
+            $this->newProjectFields($f, $customerId, $row, $errors, 'receive');
         }
         $row['name'] = $row['name'] ?: ($existing['project_key'] ?? $row['project_key'] ?? '');
 
         return [$row, $errors];
+    }
+
+    /**
+     * Send project (E-27): limits, allowed sender domains (or all) and the domain test criteria; no routes.
+     *
+     * @return array{0: array<string, mixed>, 1: array<string, string>}
+     */
+    private function sendFromForm(array $f, ?array $existing, int $customerId): array
+    {
+        $errors = [];
+        $limit  = static function (string $k) use ($f, &$errors): ?int {
+            $v = trim((string) ($f[$k] ?? ''));
+            if ($v === '') {
+                return null;
+            }
+            if (! ctype_digit($v) || (int) $v > self::MAX_SEND_LIMIT) {
+                $errors[$k] = 'Ganze Zahl 0-' . number_format(self::MAX_SEND_LIMIT, 0, ',', '.') . ' oder leer (keine Grenze).';
+
+                return null;
+            }
+
+            return (int) $v;
+        };
+        $domains = null;
+        if (empty($f['send_all_domains'])) {
+            $domains = array_values(array_unique(array_filter(array_map(static fn ($l) => strtolower(rtrim(trim($l), '.')), preg_split('/[\s,]+/', (string) ($f['send_allowed_domains'] ?? '')) ?: []))));
+            sort($domains);
+            foreach ($domains as $d) {
+                if (! preg_match('/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/', $d)) {
+                    $errors['send_allowed_domains'] = 'Ungültige Domain: ' . $d;
+                }
+            }
+            if ($domains === []) {
+                $errors['send_allowed_domains'] = 'Mindestens eine Domain angeben oder „alle Domains“ wählen.';
+            }
+        }
+        $criteria = [];
+        foreach (array_keys(self::TEST_CRITERIA) as $k) {
+            $criteria[$k] = ! empty($f['criteria'][$k] ?? null);
+        }
+        $settings = ['send_limit_hour' => $limit('send_limit_hour'), 'send_limit_day' => $limit('send_limit_day'),
+            'send_allowed_domains' => $domains, 'send_test_criteria' => $criteria];
+        if ($settings['send_limit_hour'] !== null && $settings['send_limit_day'] !== null && $settings['send_limit_hour'] > $settings['send_limit_day']) {
+            $errors['send_limit_hour'] = 'Mehr pro Stunde als pro Tag ergibt keinen Sinn.';
+        }
+        $row = ['name' => trim((string) ($f['name'] ?? '')), 'enabled' => ! empty($f['enabled']) ? 1 : 0, 'routes' => '[]', 'settings' => json_encode($settings)];
+        if ($existing === null) {
+            $row['profile'] = 'smarthost';
+            $this->newProjectFields($f, $customerId, $row, $errors, 'send');
+        }
+        $row['name'] = $row['name'] ?: ($existing['project_key'] ?? $row['project_key'] ?? '');
+
+        return [$row, $errors];
+    }
+
+    /** Key, node and type of a new project (both types). */
+    private function newProjectFields(array $f, int $customerId, array &$row, array &$errors, string $type): void
+    {
+        $row['type']        = $type;
+        $row['project_key'] = (string) ($f['project_key'] ?? '');
+        $row['node_id']     = (int) db_connect()->table('nodes')->select('id')->where('public_id', (string) ($f['node_id'] ?? ''))->get()->getRow('id');
+        if (! preg_match(Customers::KEY, $row['project_key'])) {
+            $errors['project_key'] = '3-40 Zeichen: a-z, 0-9, „-“';
+        } elseif (db_connect()->table('projects')->where('customer_id', $customerId)->where('project_key', $row['project_key'])->countAllResults() > 0) {
+            $errors['project_key'] = 'Dieses Projekt gibt es schon.';
+        }
+        if (db_connect()->table('nodes')->where('id', $row['node_id'])->countAllResults() === 0) {
+            $errors['node_id'] = 'Bitte eine Node wählen.';
+        }
     }
 
     /**

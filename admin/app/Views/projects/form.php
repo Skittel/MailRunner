@@ -4,6 +4,13 @@ $s = $isNew ? (is_string($project['settings'] ?? null) ? json_decode($project['s
 $s = ($s ?: []) + ['recipient_pattern' => null, 'recipient_always_allow' => null, 'delete_after_ack_hours' => 24, 'unacked_days' => 14, 'metadata_days' => 30,
     'journal_scope' => 'own', 'role_mail' => 'default', 'role_mail_forward_to' => null];
 $routes = implode("\n", json_decode((string) ($project['routes'] ?? '[]'), true) ?: []);
+$type = $project['type'] ?? 'receive';
+$s += ['send_limit_hour' => null, 'send_limit_day' => null, 'send_allowed_domains' => null, 'send_test_criteria' => null];
+$criteria = array_map(static fn ($c) => $c[1], Projects::TEST_CRITERIA);
+if (is_array($s['send_test_criteria'])) {
+    $criteria = array_intersect_key($s['send_test_criteria'], $criteria) + $criteria;
+}
+$allDomains = $isNew && empty($errors) ? false : $s['send_allowed_domains'] === null;
 $err = static fn ($k) => isset($errors[$k]) ? ' is-invalid' : '';
 $fb = static fn ($k) => isset($errors[$k]) ? '<div class="invalid-feedback">' . esc($errors[$k]) . '</div>' : '';
 ?>
@@ -32,14 +39,20 @@ $this->setVar('pretitle', '<a href="/customers/' . $customer['public_id'] . '">'
             <div class="col-md-4 mb-3"><label class="form-label required">Schlüssel</label><input name="project_key" class="form-control<?= $err('project_key') ?>" value="<?= esc($project['project_key'] ?? '') ?>" placeholder="inbox"><?= $fb('project_key') ?></div>
             <div class="col-md-4 mb-3"><label class="form-label required">Node</label><select name="node_id" class="form-select<?= $err('node_id') ?>">
                 <?php foreach ($nodes as $n): ?><option value="<?= $n['public_id'] ?>"<?= (int) ($project['node_id'] ?? 0) === (int) $n['id'] ? ' selected' : '' ?>><?= esc($n['name']) ?> (<?= esc($n['node_key']) ?>)</option><?php endforeach ?></select><?= $fb('node_id') ?></div>
-            <div class="col-md-4 mb-3"><label class="form-label required">Profil</label><select name="profile" class="form-select">
+            <div class="col-md-4 mb-3"><label class="form-label required">Typ</label><select name="type" id="project-type" class="form-select">
+                <?php foreach (Projects::TYPES as $k => $l): ?><option value="<?= $k ?>"<?= $type === $k ? ' selected' : '' ?>><?= esc($l) ?></option><?php endforeach ?></select>
+                <div class="form-hint">Kann später nicht geändert werden.</div></div>
+            <div class="col-md-4 mb-3" data-type="receive"><label class="form-label required">Profil</label><select name="profile" class="form-select">
                 <?php foreach (Projects::PROFILES as $k => $l): ?><option value="<?= $k ?>"<?= ($project['profile'] ?? 'analysis') === $k ? ' selected' : '' ?>><?= esc($l) ?></option><?php endforeach ?></select></div>
             <?php else: ?>
-            <div class="col-md-6 mb-3"><label class="form-label">Node</label><div class="form-control-plaintext mono"><?= esc($project['node_key']) ?></div></div>
-            <div class="col-md-6 mb-3"><label class="form-label">Profil</label><div class="form-control-plaintext"><?= esc(Projects::PROFILES[$project['profile']] ?? $project['profile']) ?></div></div>
+            <div class="col-md-4 mb-3"><label class="form-label">Node</label><div class="form-control-plaintext mono"><?= esc($project['node_key']) ?></div></div>
+            <div class="col-md-4 mb-3"><label class="form-label">Typ</label><div class="form-control-plaintext"><?= esc(Projects::TYPES[$type] ?? $type) ?></div></div>
+            <?php if ($type === 'receive'): ?><div class="col-md-4 mb-3"><label class="form-label">Profil</label><div class="form-control-plaintext"><?= esc(Projects::PROFILES[$project['profile']] ?? $project['profile']) ?></div></div><?php endif ?>
             <?php endif ?>
         </div>
         <div class="mb-3"><label class="form-label">Name</label><input name="name" class="form-control" value="<?= esc($project['name'] ?? '') ?>"></div>
+        <?php if ($isNew || $type === 'receive'): ?>
+        <div data-type="receive">
         <div class="mb-3"><label class="form-label">Routen</label><textarea name="routes" rows="3" class="form-control mono<?= $err('routes') ?>" placeholder="example.org&#10;info@other.example"><?= esc($routes) ?></textarea><?= $fb('routes') ?>
             <div class="form-hint">Eine Domain oder Adresse pro Zeile. postmaster@ und abuse@ werden für jede Domain immer angenommen.</div></div>
         <div class="row">
@@ -58,6 +71,26 @@ $this->setVar('pretitle', '<a href="/customers/' . $customer['public_id'] . '">'
                 <?php foreach (Projects::ROLE_MAIL as $k => $l): ?><option value="<?= $k ?>"<?= $s['role_mail'] === $k ? ' selected' : '' ?>><?= esc($l) ?></option><?php endforeach ?></select></div>
             <div class="col-md-4 mb-3"><label class="form-label">Weiterleiten an</label><input type="email" name="role_mail_forward_to" class="form-control<?= $err('role_mail_forward_to') ?>" value="<?= esc($s['role_mail_forward_to'] ?? '') ?>"><?= $fb('role_mail_forward_to') ?></div>
         </div>
+        </div>
+        <?php endif ?>
+        <?php if ($isNew || $type === 'send'): ?>
+        <div data-type="send">
+        <div class="row">
+            <div class="col-md-6 mb-3"><label class="form-label">Mails pro Stunde (Projekt)</label><input type="number" min="0" max="<?= Projects::MAX_SEND_LIMIT ?>" name="send_limit_hour" class="form-control<?= $err('send_limit_hour') ?>" value="<?= esc((string) ($s['send_limit_hour'] ?? '')) ?>" placeholder="keine Grenze"><?= $fb('send_limit_hour') ?></div>
+            <div class="col-md-6 mb-3"><label class="form-label">Mails pro Tag (Projekt)</label><input type="number" min="0" max="<?= Projects::MAX_SEND_LIMIT ?>" name="send_limit_day" class="form-control<?= $err('send_limit_day') ?>" value="<?= esc((string) ($s['send_limit_day'] ?? '')) ?>" placeholder="keine Grenze"><?= $fb('send_limit_day') ?></div>
+            <div class="col-12 form-hint mb-3">Obergrenzen für alle Sendeprofile des Projekts. Die Node lehnt Profile ab, die darüber liegen.</div>
+        </div>
+        <div class="mb-3"><label class="form-label">Erlaubte Absenderdomains</label>
+            <label class="form-check mb-2"><input class="form-check-input" type="checkbox" name="send_all_domains" value="1"<?= $allDomains ? ' checked' : '' ?>><span class="form-check-label">alle Domains</span></label>
+            <textarea name="send_allowed_domains" rows="3" class="form-control mono<?= $err('send_allowed_domains') ?>" placeholder="shop.example&#10;example.org"><?= esc(implode("\n", $s['send_allowed_domains'] ?? [])) ?></textarea><?= $fb('send_allowed_domains') ?>
+            <div class="form-hint">Eine Domain pro Zeile, Subdomains sind eingeschlossen. Der Kunde kann DKIM-Schlüssel nur für diese Domains setzen.</div></div>
+        <div class="mb-3"><label class="form-label">Domain-Test muss bestehen</label>
+            <?php foreach (Projects::TEST_CRITERIA as $k => [$label]): ?>
+            <label class="form-check"><input class="form-check-input" type="checkbox" name="criteria[<?= $k ?>]" value="1"<?= ! empty($criteria[$k]) ? ' checked' : '' ?>><span class="form-check-label"><?= esc($label) ?></span></label>
+            <?php endforeach ?>
+            <div class="form-hint">Ohne bestandenen Test versendet die Node nichts von dieser Domain. Der Kunde sieht nur bestanden oder nicht bestanden mit den Gründen.</div></div>
+        </div>
+        <?php endif ?>
         <label class="form-check form-switch"><input class="form-check-input" type="checkbox" name="enabled" value="1"<?= ($project['enabled'] ?? 1) ? ' checked' : '' ?>><span class="form-check-label">aktiv</span></label>
     </fieldset>
     <?php if (can_write()): ?><div class="card-footer text-end"><a href="/customers/<?= $customer['public_id'] ?>" class="btn btn-link">Abbrechen</a><button class="btn btn-primary"><?= $isNew ? 'Anlegen und übertragen' : 'Speichern und übertragen' ?></button></div><?php endif ?>

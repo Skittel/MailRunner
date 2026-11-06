@@ -11,7 +11,8 @@ use App\Core\Support\Time;
  * GET    /admin/v1/projects
  * GET    /admin/v1/projects/{customer}/{project}          incl. routes, tokens (hash, never the secret) and webhook state
  * PUT    /admin/v1/projects/{customer}/{project}          complete configuration, idempotent:
- *        {"profile": "analysis", "name": "...", "enabled": true, "routes": ["example.org", ...],
+ *        {"type": "receive"|"send" (fixed at creation, default receive), "profile": "analysis", "name": "...", "enabled": true, "routes": ["example.org", ...],
+ *        send projects: profile smarthost, no routes, settings send_limit_hour/day, send_allowed_domains (null = all), send_test_criteria
  *         "settings": {"recipient_pattern": ..., "journal_scope": ..., "role_mail": ..., ...},
  *         "tokens": [{"token_id", "label", "secret_hash", "created_at", "expires_at", "revoked_at"}, ...]}
  *        "tokens" (optional) is the full central token set of the project: see ApiTokenService::sync()
@@ -21,7 +22,8 @@ use App\Core\Support\Time;
 class Projects extends AdminController
 {
     public const SETTINGS = ['recipient_pattern', 'recipient_always_allow', 'delete_after_ack_hours', 'unacked_days',
-        'metadata_days', 'journal_scope', 'role_mail', 'role_mail_forward_to'];
+        'metadata_days', 'journal_scope', 'role_mail', 'role_mail_forward_to',
+        'send_limit_hour', 'send_limit_day', 'send_allowed_domains', 'send_test_criteria'];
 
     public function index()
     {
@@ -44,6 +46,7 @@ class Projects extends AdminController
 
             return ApiResponse::ok(['data' => self::present($p, array_column(service('routeService')->list($ref), 'route')) + [
                 'messages_unacked' => $unacked,
+                'domains' => $p['type'] === 'send' ? array_map(static fn ($d) => \App\Core\Send\SendDomainService::present($d, $p), service('sendDomainService')->list((int) $p['id'])) : null,
                 'tokens_central' => (int) ($p['tokens_central'] ?? 0) === 1,
                 'webhook' => \App\Core\Webhooks\WebhookService::present(service('webhookService')->get((int) $p['id'])), // set by the customer (PUT /v1/webhook)
                 'tokens' => array_map(static fn ($t) => [
@@ -106,17 +109,23 @@ class Projects extends AdminController
      */
     public static function present(array $p, array $routes): array
     {
+        $type     = $p['type'] ?? 'receive';
         $settings = [];
-        foreach (self::SETTINGS as $k) {
-            $settings[$k] = $k === 'recipient_always_allow' ? json_decode((string) ($p[$k] ?? 'null'), true) : $p[$k];
+        foreach (array_diff(self::SETTINGS, $type === 'send' ? \App\Core\Projects\ProjectService::RECEIVE_SETTINGS : \App\Core\Projects\ProjectService::SEND_SETTINGS) as $k) {
+            $settings[$k] = in_array($k, ['recipient_always_allow', 'send_allowed_domains'], true) ? json_decode((string) ($p[$k] ?? 'null'), true) : $p[$k];
         }
-        foreach (['delete_after_ack_hours', 'unacked_days', 'metadata_days'] as $k) {
-            $settings[$k] = (int) $settings[$k];
+        foreach (['delete_after_ack_hours', 'unacked_days', 'metadata_days', 'send_limit_hour', 'send_limit_day'] as $k) {
+            if (array_key_exists($k, $settings) && $settings[$k] !== null) {
+                $settings[$k] = (int) $settings[$k];
+            }
+        }
+        if ($type === 'send') {
+            $settings['send_test_criteria'] = \App\Core\Projects\ProjectService::testCriteria($p);
         }
 
         return [
             'ref' => $p['customer_key'] . '/' . $p['project_key'], 'customer' => $p['customer_key'], 'project' => $p['project_key'],
-            'name' => $p['name'], 'profile' => $p['profile'], 'enabled' => (bool) $p['enabled'], 'managed_by' => $p['managed_by'],
+            'type' => $type, 'name' => $p['name'], 'profile' => $p['profile'], 'enabled' => (bool) $p['enabled'], 'managed_by' => $p['managed_by'],
             'revision' => (int) $p['revision'], 'updated_at' => Time::toIso($p['updated_at']), 'routes' => $routes, 'settings' => $settings,
         ];
     }

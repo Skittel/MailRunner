@@ -11,6 +11,9 @@ Groups:
   smtp     delivery over the node's public IPv4/IPv6 on port 25: STARTTLS, certificate (name, >= 14 days),
            rejections (recipient pattern, no open relay), postmaster accepted, time until 250
   analysis fixed scenarios with sender domains from the local zone selftest.test (expected results)
+  send     send role (E-27, only if enabled): HELO name and source addresses configured, every address on this
+           node, its PTR names the HELO name, the HELO name resolves to every address (FCrDNS), outgoing port 25
+           open from every address (banner + EHLO at the SmartMailFlow test MX, no mail). Details name no address.
   api      collection over the public HTTPS API with the self test token, completeness, encryption at rest,
            project isolation, ack, journal (receive.received/acked, smtp.attempt), deletion after ack
 
@@ -778,14 +781,100 @@ def submission_checks(run, env=None):
     if found:
         api.call("messages/ack", {"message_ids": [m["message_id"] for m in found.values()]})
 
+
+# --------------------------------------------------------------------------- send role (E-27)
+SEND_PROBE = {4: "ip4.smartmailflow.email", 6: "ip6.smartmailflow.email"}   # MX hosts reachable only over v4 / v6
+
+
+def send_labels(ips):
+    """[(ip, family, label)], label like v4.1 / v6.1: the journal is readable by every project, so no addresses."""
+    import ipaddress
+    out, count = [], {4: 0, 6: 0}
+    for ip in ips:
+        addr = ipaddress.ip_address(ip.strip())
+        count[addr.version] += 1
+        out.append((str(addr), addr.version, f"v{addr.version}.{count[addr.version]}"))
+    return out
+
+
+def ptr_matches(ptr_names, helo):
+    return any(n.lower().rstrip(".") == helo.lower().rstrip(".") for n in ptr_names)
+
+
+def _send_resolve(name, rtype):
+    import dns.resolver
+    try:
+        return [a.to_text() for a in resolver().resolve(name, rtype)]
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+        return []
+
+
+def _send_ptr(ip):
+    import dns.resolver
+    import dns.reversename
+    try:
+        return [a.to_text() for a in resolver().resolve(dns.reversename.from_address(ip), "PTR")]
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+        return []
+
+
+def _send_probe(ip, fam, helo, timeout=15):
+    """Banner and EHLO from the source address at the probe MX of that family; no mail. -> (status, detail)."""
+    mx = sorted((int(r.split()[0]), r.split()[1].rstrip(".")) for r in _send_resolve(SEND_PROBE[fam], "MX"))
+    target = mx[0][1] if mx else SEND_PROBE[fam]
+    s = smtplib.SMTP(timeout=timeout, local_hostname=helo, source_address=(ip, 0))
+    try:
+        code, _ = s.connect(target, 25)
+        if code != 220:
+            return "fail", f"banner {code}"
+        code, _ = s.ehlo(helo)
+        return ("ok", "port 25 open, EHLO accepted") if code == 250 else ("fail", f"EHLO answered {code}")
+    finally:
+        try:
+            s.quit()
+        except Exception:
+            pass
+
+
+def send_checks(run, helo, ips, resolve=None, ptr=None, probe=None, own=None):
+    resolve, ptr, probe = resolve or _send_resolve, ptr or _send_ptr, probe or _send_probe
+    if own is None:
+        from . import analyzer
+        own = analyzer.node_addresses()
+    if not helo or not ips:
+        run.add("send", "send.config", "fail", "send role enabled, but MAILRUNNER_SEND_HELO and MAILRUNNER_SEND_IPV4/IPV6 are not set")
+        return
+    labels = send_labels(ips)
+    run.add("send", "send.config", "ok", f"HELO {helo}, {sum(1 for _, f, _ in labels if f == 4)} IPv4, {sum(1 for _, f, _ in labels if f == 6)} IPv6")
+    forward = {4: set(resolve(helo, "A")), 6: set(resolve(helo, "AAAA"))}
+    missing = [label for ip, fam, label in labels if ip not in forward[fam]]
+    run.add("send", "send.helo_dns", "fail" if missing else "ok",
+            f"{helo} does not resolve to {', '.join(missing)}" if missing else f"{helo} resolves to every source address")
+    for ip, fam, label in labels:
+        if ip not in own:
+            run.add("send", f"send.{label}.local", "fail", "address is not configured on this node")
+            continue
+        names = ptr(ip)
+        run.add("send", f"send.{label}.ptr", "ok" if ptr_matches(names, helo) else "fail",
+                f"PTR is {helo}" if ptr_matches(names, helo) else ("no PTR record" if not names else "PTR names another host, expected " + helo))
+        t0 = time.monotonic()
+        try:
+            status, detail = probe(ip, fam, helo)
+        except (OSError, smtplib.SMTPException) as e:
+            status, detail = "fail", f"outgoing port 25 not reachable ({e.__class__.__name__}) - blocked by the provider?"
+        run.add("send", f"send.{label}.port25", status, detail, (time.monotonic() - t0) * 1000)
+
 # --------------------------------------------------------------------------- main
-def run_all(hostname, journal_after=0, skip_mail=False, mx_names=""):
+def run_all(hostname, journal_after=0, skip_mail=False, mx_names="", send=None):
+    """send: None = send role off, else {"helo": str, "ips": [str]}"""
     run = Run(hostname)
     zone_ok = base_checks(run)
     ipv6_route_check(run, mx_names)
     if zone_ok:
         mx_checks(run, mx_names)
     route_mx_checks(run)
+    if send is not None:
+        send_checks(run, send.get("helo", ""), send.get("ips", []))
     if skip_mail:
         return run.result()
     if not zone_ok:
