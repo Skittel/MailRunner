@@ -17,7 +17,7 @@ class WebhookSend extends MrCommand
     protected function execute(): ?int
     {
         $stats = (new WebhookSender(db_connect(), service('journalWriter'), service('webhookService'), null,
-            config('Mailrunner')->dataDir . '/webhook.request'))->run();
+            config('Mailrunner')->dataDir . '/webhook.request', [config('Mailrunner')->dataDir . '/send/requests/webhook.request']))->run();
         $this->json() ? $this->outputJson($stats) : $this->ok(sprintf('Webhook pings: sent %d, failed %d', $stats['sent'], $stats['failed']));
 
         return null;

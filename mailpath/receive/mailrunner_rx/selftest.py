@@ -838,7 +838,12 @@ def _send_probe(ip, fam, helo, timeout=15):
             pass
 
 
-def send_checks(run, helo, ips, resolve=None, ptr=None, probe=None, own=None):
+def _service_active(name):
+    return subprocess.run(["systemctl", "is-active", "--quiet", name]).returncode == 0
+
+
+def send_checks(run, helo, ips, resolve=None, ptr=None, probe=None, own=None, active=None):
+    """active: callable(unit) -> bool; given by run_all, the delivery worker must run (tests leave it out)."""
     resolve, ptr, probe = resolve or _send_resolve, ptr or _send_ptr, probe or _send_probe
     if own is None:
         from . import analyzer
@@ -865,6 +870,9 @@ def send_checks(run, helo, ips, resolve=None, ptr=None, probe=None, own=None):
         except (OSError, smtplib.SMTPException) as e:
             status, detail = "fail", f"outgoing port 25 not reachable ({e.__class__.__name__}) - blocked by the provider?"
         run.add("send", f"send.{label}.port25", status, detail, (time.monotonic() - t0) * 1000)
+    if active is not None:
+        ok = active("mailrunner-sender")
+        run.add("send", "send.worker", "ok" if ok else "fail", "delivery worker mailrunner-sender running" if ok else "delivery worker mailrunner-sender is not running")
 
 # --------------------------------------------------------------------------- main
 def run_all(hostname, journal_after=0, skip_mail=False, mx_names="", send=None):
@@ -876,7 +884,7 @@ def run_all(hostname, journal_after=0, skip_mail=False, mx_names="", send=None):
         mx_checks(run, mx_names)
     route_mx_checks(run)
     if send is not None:
-        send_checks(run, send.get("helo", ""), send.get("ips", []))
+        send_checks(run, send.get("helo", ""), send.get("ips", []), active=_service_active)
     if skip_mail:
         return run.result()
     if not zone_ok:

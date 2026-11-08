@@ -134,6 +134,9 @@ class SendDomainService
             'dkim' => ['selector' => $row['dkim_selector'], 'algorithm' => $row['dkim_algorithm'], 'bits' => (int) $row['dkim_bits'], 'key_sha256' => $row['key_sha256']],
             'dns' => DkimKeys::dnsRecord($row['domain'], $row['dkim_selector'], $row['dkim_algorithm'], $row['dkim_public']),
             'allowed' => $project === null ? null : ProjectService::sendDomainAllowed($project, $row['domain']),
+            // domain test (step 5): only a passed test for exactly the current key lets the domain send
+            'test' => ['status' => ($row['test_status'] ?? 'untested') === 'passed' && ($row['test_key_sha256'] ?? null) !== $row['key_sha256'] ? 'untested' : ($row['test_status'] ?? 'untested'),
+                'passed_at' => Time::toIso($row['test_passed_at'] ?? null), 'checked_at' => Time::toIso($row['test_checked_at'] ?? null)],
             'created_at' => Time::toIso($row['created_at']), 'updated_at' => Time::toIso($row['updated_at']),
         ];
     }

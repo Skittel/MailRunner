@@ -77,6 +77,7 @@ echo "postfix postfix/main_mailer_type select No configuration" | debconf-set-se
 echo "postfix postfix/mailname string $HOST" | debconf-set-selections
 DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
     postfix postfix-pcre python3-milter python3-nacl python3-dkim python3-spf python3-dnspython python3-cryptography \
+    python3-aiosmtplib python3-pymysql \
     python3-requests openssl unbound certbot curl \
     php-cli php-fpm php-mysql php-intl php-mbstring php-curl php-xml composer mariadb-server nginx rsync >/dev/null
 
@@ -120,6 +121,8 @@ fi
 
 log "System user and directories"
 getent passwd mailrunner >/dev/null || useradd --system --user-group --home-dir /var/lib/mailrunner --shell /usr/sbin/nologin mailrunner
+# send role: the delivery worker runs as its own user in group mailrunner (reads, does not write the node's files)
+getent passwd mailrunner-send >/dev/null || useradd --system --gid mailrunner --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin mailrunner-send
 install -d -o root -g mailrunner -m 0750 /etc/mailrunner /etc/mailrunner/generated
 install -d -o mailrunner -g mailrunner -m 0700 /var/lib/mailrunner/secrets   # common secrets from MailRunner Admin
 install -d -o mailrunner -g mailrunner -m 0750 /var/lib/mailrunner /var/lib/mailrunner/receive \
@@ -129,6 +132,7 @@ install -d -o mailrunner -g mailrunner -m 0750 /var/lib/mailrunner /var/lib/mail
     /var/lib/mailrunner/writable /var/lib/mailrunner/writable/cache /var/lib/mailrunner/writable/logs \
     /var/lib/mailrunner/writable/session /var/lib/mailrunner/writable/uploads /var/lib/mailrunner/writable/debugbar \
     /var/lib/mailrunner/update
+install -d -o mailrunner -g mailrunner -m 2770 /var/lib/mailrunner/send/requests   # mr-sender asks for webhook pings here
 install -d -m 0755 /opt/mailrunner /opt/mailrunner/releases
 
 if [[ ! -f /etc/mailrunner/app.env ]]; then
@@ -316,6 +320,13 @@ systemctl enable mailrunner-smtplog >/dev/null 2>&1
 systemctl reset-failed mailrunner-import.service mailrunner-import.path mailrunner-webhook.service mailrunner-webhook.path \
     mailrunner-apply.service mailrunner-apply.path >/dev/null 2>&1 || true
 systemctl restart mailrunner-smtplog mailrunner-import.path mailrunner-webhook.path mailrunner-apply.path
+# delivery worker: only on nodes with the send role
+if grep -qE '^MAILRUNNER_SEND_ENABLED = "?true"?' /etc/mailrunner/app.env; then
+    systemctl enable mailrunner-sender >/dev/null 2>&1
+    systemctl restart mailrunner-sender
+else
+    systemctl disable --now mailrunner-sender >/dev/null 2>&1 || true
+fi
 
 log "API (php-fpm + nginx)"
 # Admin API trust: CA of MailRunner Admin (public certificate only). Without it /admin/ answers 403.

@@ -19,7 +19,8 @@ use App\Core\Support\Time;
  *                                            "headers"?, "attachments"?} or raw {"raw": base64, "recipients"?: [...]}
  *                                            -> 202 {submission_id, messages: [{message_id, recipient, status}]}
  * GET  /v1/send/submissions/{submission_id}  submission with its messages
- * GET  /v1/send/messages/{message_id}        one message (one recipient)
+ * GET  /v1/send/messages?after=&limit=&status= messages changed after the cursor (change_seq), oldest change first
+ * GET  /v1/send/messages/{message_id}        one message (one recipient) with all delivery attempts
  */
 class Send extends BaseController
 {
@@ -62,6 +63,29 @@ class Send extends BaseController
         return ApiResponse::ok(['data' => self::presentSubmission($s) + ['messages' => array_map([self::class, 'presentMessage'], $msgs)]]);
     }
 
+    public function messages()
+    {
+        $after  = $this->request->getGet('after') ?? '0';
+        $limit  = $this->request->getGet('limit') ?? '100';
+        $status = $this->request->getGet('status');
+        if (! ctype_digit((string) $after) || ! ctype_digit((string) $limit) || (int) $limit < 1 || (int) $limit > 1000
+            || ($status !== null && ! in_array($status, self::STATUSES, true))) {
+            return ApiResponse::error(400, 'INVALID_REQUEST', 'after: cursor (integer), limit: 1-1000, status: one of ' . implode(', ', self::STATUSES));
+        }
+        $q = db_connect()->table('send_messages m')->select('m.*, s.submission_id')->join('send_submissions s', 's.id = m.submission_row_id')
+            ->where('m.project_id', CurrentToken::projectId())->where('m.change_seq >', (int) $after);
+        if ($status !== null) {
+            $q->where('m.status', $status);
+        }
+        $rows = $q->orderBy('m.change_seq')->limit((int) $limit)->get()->getResultArray();
+
+        return ApiResponse::ok([
+            'data' => array_map(static fn ($m) => self::presentMessage($m) + ['submission_id' => $m['submission_id']], $rows),
+            'next_cursor' => $rows === [] ? (int) $after : (int) end($rows)['change_seq'],
+            'has_more' => count($rows) === (int) $limit,
+        ]);
+    }
+
     public function message(string $id)
     {
         $m = db_connect()->table('send_messages')->where('message_id', $id)->where('project_id', CurrentToken::projectId())->get()->getRowArray();
@@ -70,7 +94,10 @@ class Send extends BaseController
         }
         $s = db_connect()->table('send_submissions')->where('id', $m['submission_row_id'])->get()->getRowArray();
 
-        return ApiResponse::ok(['data' => self::presentMessage($m) + ['submission' => self::presentSubmission($s)]]);
+        $attempts = db_connect()->table('send_attempts')->where('message_row_id', $m['id'])->orderBy('id')->get()->getResultArray();
+
+        return ApiResponse::ok(['data' => self::presentMessage($m) + ['submission' => self::presentSubmission($s),
+            'delivery_attempts' => array_map([self::class, 'presentAttempt'], $attempts)]]);
     }
 
     /** @return array{0: string, 1: list<string>, 2: string} */
@@ -152,13 +179,30 @@ class Send extends BaseController
         ];
     }
 
+    public const STATUSES = ['queued', 'waiting_test', 'sending', 'deferred', 'sent', 'bounced', 'failed'];
+
     /** @param array<string, mixed> $m */
     public static function presentMessage(array $m): array
     {
+        $final = in_array($m['status'], ['sent', 'bounced', 'failed'], true);
+
         return [
             'message_id' => $m['message_id'], 'recipient' => $m['recipient'], 'status' => $m['status'], 'status_reason' => $m['status_reason'],
-            'attempts' => (int) $m['attempts'], 'next_attempt_at' => Time::toIso($m['next_attempt_at']), 'expires_at' => Time::toIso($m['expires_at']),
+            'attempts' => (int) $m['attempts'], 'next_attempt_at' => $final ? null : Time::toIso($m['next_attempt_at']), 'expires_at' => Time::toIso($m['expires_at']),
+            'last_response' => $m['last_code'] === null ? null : ['code' => (int) $m['last_code'], 'enhanced' => $m['last_enhanced'], 'message' => $m['last_response']],
+            'sent_at' => Time::toIso($m['sent_at']), 'cursor' => (int) $m['change_seq'],
             'created_at' => Time::toIso($m['created_at']), 'updated_at' => Time::toIso($m['updated_at']),
+        ];
+    }
+
+    /** @param array<string, mixed> $a */
+    public static function presentAttempt(array $a): array
+    {
+        return [
+            'attempt' => (int) $a['attempt_no'], 'started_at' => Time::toIso($a['started_at']), 'duration_ms' => (int) $a['duration_ms'],
+            'local_ip' => $a['local_ip'], 'mx_host' => $a['mx_host'], 'mx_ip' => $a['mx_ip'], 'stage' => $a['stage'], 'result' => $a['result'],
+            'smtp_code' => $a['smtp_code'] === null ? null : (int) $a['smtp_code'], 'enhanced_code' => $a['enhanced_code'], 'response' => $a['response'],
+            'tls_version' => $a['tls_version'], 'tls_cipher' => $a['tls_cipher'],
         ];
     }
 }

@@ -1,0 +1,27 @@
+[Unit]
+Description=MailRunner: delivery worker of the send role (mr-sender)
+After=network-online.target unbound.service mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# own user (E-27): only this process opens outgoing SMTP connections; group mailrunner reads node key, app.env and
+# the encrypted mails in send/store, but cannot change them
+User=mailrunner-send
+Group=mailrunner
+ExecStart=/opt/mailrunner/current/mailpath/send/bin/mr-sender
+Restart=always
+RestartSec=5
+TimeoutStopSec=90
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/lib/mailrunner/send/requests
+
+[Install]
+WantedBy=multi-user.target

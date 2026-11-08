@@ -43,7 +43,8 @@ class Node extends AdminController
             'counts'   => $counts,
             'send'     => ['enabled' => config('Mailrunner')->sendEnabled, 'helo' => config('Mailrunner')->sendHelo ?: null,
                 'ipv4' => config('Mailrunner')->sendIpv4, 'ipv6' => config('Mailrunner')->sendIpv6,
-                'projects' => $db->table('projects')->where('type', 'send')->countAllResults(), 'domains' => $db->table('send_domains')->countAllResults()],
+                'projects' => $db->table('projects')->where('type', 'send')->countAllResults(), 'domains' => $db->table('send_domains')->countAllResults(),
+                'queue' => self::sendQueue($db)],
             'policy'   => ['updates' => config('Mailrunner')->adminUpdates, 'config' => config('Mailrunner')->adminConfig],
             'pending_changes' => (new PendingChanges())->count(),
             'update_requested' => Updater::forNode()->requested()['version'] ?? null,
@@ -53,6 +54,27 @@ class Node extends AdminController
     }
 
     /** Last update attempt (node.updated / node.update_failed / node.update_refused) or null. */
+    /**
+     * Send queue figures: messages per open status, finished in the last 24 h, the oldest waiting message.
+     *
+     * @return array<string, mixed>
+     */
+    private static function sendQueue(\CodeIgniter\Database\BaseConnection $db): array
+    {
+        $out = ['queued' => 0, 'waiting_test' => 0, 'sending' => 0, 'deferred' => 0];
+        foreach ($db->query("SELECT status, COUNT(*) AS n FROM send_messages WHERE status IN ('queued','waiting_test','sending','deferred') GROUP BY status")->getResultArray() as $r) {
+            $out[$r['status']] = (int) $r['n'];
+        }
+        $since = Time::nowObject()->sub(new \DateInterval('P1D'))->format(Time::DB_FORMAT);
+        $last  = ['sent' => 0, 'bounced' => 0, 'failed' => 0];
+        foreach ($db->query("SELECT status, COUNT(*) AS n FROM send_messages WHERE status IN ('sent','bounced','failed') AND updated_at >= ? GROUP BY status", [$since])->getResultArray() as $r) {
+            $last[$r['status']] = (int) $r['n'];
+        }
+        $oldest = $db->query("SELECT MIN(created_at) AS t FROM send_messages WHERE status IN ('queued','waiting_test','sending','deferred')")->getRow('t');
+
+        return $out + ['last_24h' => $last, 'oldest_open' => Time::toIso($oldest)];
+    }
+
     private static function lastUpdate(): ?array
     {
         $r = db_connect()->table('journal')->select('created_at, event, details')->whereIn('event', ['node.updated', 'node.update_failed', 'node.update_refused'])

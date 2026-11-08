@@ -2,6 +2,28 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
+## 0.2.4 - 2026-11-08
+Send role, step 4 of 7 (decision E-27): delivery worker. Nothing leaves a node yet: a domain only sends after a
+passed domain test (step 5), and no domain can pass one before that step.
+- `mr-sender` (systemd `mailrunner-sender`, own user `mailrunner-send` in group `mailrunner`, only on nodes with the
+  send role): claims due messages (`FOR UPDATE SKIP LOCKED`, leases), decrypts the mail in memory, signs it with the
+  domain's DKIM key (rsa-sha256 / ed25519-sha256), resolves MX (implicit MX, null MX = hardfail), tries IPv6 then
+  IPv4 with the node's source addresses, STARTTLS when offered (plain-text retry if the handshake fails),
+  recipients of one domain in one transaction. 20 deliveries in parallel, 3 per recipient domain.
+- Gates before every attempt: no passed domain test for the current DKIM key -> `waiting_test`, after 5 minutes
+  `failed` (`dns_not_verified`); DKIM key or mail missing -> `failed`; project disabled -> `deferred`.
+- Retries as planned in the profile (first after 1 minute, growing gaps, last at the give-up time), then `failed`
+  (`retries_exhausted`); 5xx -> `bounced`.
+- Every try stored per MX address (`send_attempts`: time, own IP, MX host and IP, stage, SMTP code, enhanced code,
+  answer, TLS version and cipher, duration). `GET /v1/send/messages/{id}` lists them (`delivery_attempts`).
+- `GET /v1/send/messages?after=<cursor>`: messages changed since the cursor, from a change sequence taken under a
+  row lock, so no change is skipped. Webhook `PUT /v1/webhook` also for send projects, ping with
+  `X-MailRunner-Event: delivery`.
+- Domains show the test state (`test.status`); mr:maintenance deletes the encrypted mail once every recipient is
+  final and purges send data after `metadata_days`; admin API `send.queue` (open messages per status, last 24 h).
+- Self test `send.worker`; install: python3-aiosmtplib, python3-pymysql, user `mailrunner-send`,
+  `/var/lib/mailrunner/send/requests`.
+
 ## 0.2.3 - 2026-11-08
 - Fix: many configuration changes in a row (found in the live test: send accesses created and deleted quickly)
   requested `mr:apply` more than 5 times in 10 s; systemd's start limit then left `mailrunner-apply.path` failed and

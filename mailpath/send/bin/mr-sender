@@ -1,0 +1,46 @@
+#!/usr/bin/python3 -I
+"""mr-sender - send role: delivery worker (decision E-27). See mailrunner_tx/worker.py and queue.py.
+
+Runs as systemd service mailrunner-sender (user mailrunner-send, group mailrunner). Reads the queue from MariaDB,
+the mail files from send/store and the node key; opens the outgoing SMTP connections (port 25) of the node.
+"""
+import asyncio
+import os
+import signal
+import sys
+import syslog
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.join(HERE, ".."))
+sys.path.insert(0, os.path.join(HERE, "..", "..", "receive"))
+
+from mailrunner_rx import config, crypto  # noqa: E402
+from mailrunner_tx import queue, settings, smtp, worker  # noqa: E402
+
+LEVELS = {"info": syslog.LOG_INFO, "warning": syslog.LOG_WARNING, "error": syslog.LOG_ERR}
+
+
+def log(level, text):
+    syslog.syslog(LEVELS.get(level, syslog.LOG_INFO), text)
+
+
+async def main():
+    syslog.openlog("mailrunner-sender", syslog.LOG_PID, syslog.LOG_MAIL)
+    s = settings.Settings()
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
+    if not s.enabled or not s.helo or not (s.ipv4 or s.ipv6):
+        log("info", "send role not enabled on this node (MAILRUNNER_SEND_ENABLED, HELO, source addresses); idle")
+        await stop.wait()
+        return
+    key = crypto.load_key(s.node_key_file)
+    w = worker.Worker(s, queue.Queue(s.db), key, crypto.decrypt, smtp.make_resolver(config.RESOLVER), log)
+    log("info", f"starting: helo {s.helo}, {len(s.ipv4)} IPv4, {len(s.ipv6)} IPv6, {worker.CONCURRENCY} parallel deliveries")
+    await w.run(stop)
+    log("info", "stopped")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

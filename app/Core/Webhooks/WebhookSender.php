@@ -24,11 +24,12 @@ class WebhookSender
     public const TIMEOUT         = 5;
     public const CONNECT_TIMEOUT = 3;
 
-    /** @var Closure(string, string, list<string>): array{code: ?int, error: ?string} */
+    /** @var Closure(string, string, list<string>, string): array{code: ?int, error: ?string} */
     private readonly Closure $transport;
 
     /**
-     * @param (callable(string, string, list<string>): array{code: ?int, error: ?string})|null $transport url, host, pinned ips
+     * @param (callable(string, string, list<string>, string): array{code: ?int, error: ?string})|null $transport url, host, pinned ips, event
+     * @param list<string>                                                                             $moreRequestFiles also consumed (send worker)
      */
     public function __construct(
         private readonly BaseConnection $db,
@@ -36,6 +37,7 @@ class WebhookSender
         private readonly WebhookService $webhooks,
         ?callable $transport = null,
         private readonly ?string $requestFile = null,
+        private readonly array $moreRequestFiles = [],
     ) {
         $this->transport = $transport !== null ? Closure::fromCallable($transport) : self::curl(...);
     }
@@ -52,6 +54,9 @@ class WebhookSender
         do {
             if ($this->requestFile !== null) {
                 @unlink($this->requestFile); // requests from now on start a new run after this one
+            }
+            foreach ($this->moreRequestFiles as $f) {
+                @unlink($f);
             }
             $r = $this->sendDue();
             $stats['sent'] += $r['sent'];
@@ -110,7 +115,9 @@ class WebhookSender
         $t0 = microtime(true);
         try {
             $target = $this->webhooks->resolveTarget($row['url']); // again at send time: DNS may have changed
-            $result = ($this->transport)($row['url'], $target['host'], $target['ips']);
+            // X-MailRunner-Event: "messages" (receive: new mail to collect) or "delivery" (send: status changes)
+            $type   = $this->db->table('projects')->select('type')->where('id', $projectId)->get()->getRow('type');
+            $result = ($this->transport)($row['url'], $target['host'], $target['ips'], $type === 'send' ? 'delivery' : 'messages');
         } catch (ConfigException $e) {
             $result = ['code' => null, 'error' => str_contains($e->getMessage(), 'resolve') && ! str_contains($e->getMessage(), 'non-public') ? 'dns' : 'blocked_address'];
         }
@@ -144,14 +151,14 @@ class WebhookSender
      *
      * @return array{code: ?int, error: ?string}
      */
-    private static function curl(string $url, string $host, array $ips): array
+    private static function curl(string $url, string $host, array $ips, string $event = 'messages'): array
     {
         $received = 0;
         $ch       = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_POST           => true,
             CURLOPT_POSTFIELDS     => '',
-            CURLOPT_HTTPHEADER     => ['Content-Type:', 'Expect:', 'User-Agent: MailRunner/' . (new NodeInfo(config('Mailrunner')))->version(), 'X-MailRunner-Event: messages'],
+            CURLOPT_HTTPHEADER     => ['Content-Type:', 'Expect:', 'User-Agent: MailRunner/' . (new NodeInfo(config('Mailrunner')))->version(), 'X-MailRunner-Event: ' . $event],
             CURLOPT_RESOLVE        => [$host . ':443:' . implode(',', array_map(static fn ($ip) => str_contains($ip, ':') ? '[' . $ip . ']' : $ip, $ips))],
             CURLOPT_PROTOCOLS      => CURLPROTO_HTTPS,
             CURLOPT_FOLLOWLOCATION => false,

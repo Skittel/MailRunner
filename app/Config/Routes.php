@@ -14,15 +14,17 @@ $routes->set404Override(static fn (): string => ApiResponse::error(404, 'NOT_FOU
 $routes->group('v1', ['filter' => 'bearer'], static function (RouteCollection $routes): void {
     $routes->get('node/status', '\App\Controllers\V1\NodeStatus::show');
 
+    // webhook ping: new mail (receive projects, event "messages") or status changes (send projects, event "delivery")
+    $routes->get('webhook', '\App\Controllers\V1\Webhook::show');
+    $routes->put('webhook', '\App\Controllers\V1\Webhook::put');
+    $routes->delete('webhook', '\App\Controllers\V1\Webhook::delete');
+
     if (config('Mailrunner')->receiveEnabled) {
         $routes->get('journal', '\App\Modules\Receive\Controllers\Customer\Journal::index');
         $routes->get('messages', '\App\Modules\Receive\Controllers\Customer\Messages::index');
         $routes->post('messages/ack', '\App\Modules\Receive\Controllers\Customer\Messages::ack');
         $routes->get('messages/(:segment)/raw', '\App\Modules\Receive\Controllers\Customer\Messages::raw/$1');
         $routes->get('messages/(:segment)', '\App\Modules\Receive\Controllers\Customer\Messages::show/$1');
-        $routes->get('webhook', '\App\Controllers\V1\Webhook::show');
-        $routes->put('webhook', '\App\Controllers\V1\Webhook::put');
-        $routes->delete('webhook', '\App\Controllers\V1\Webhook::delete');
         $routes->get('smtp-credentials', '\App\Controllers\V1\SmtpCredentials::index');
         $routes->post('smtp-credentials', '\App\Controllers\V1\SmtpCredentials::create');
         $routes->patch('smtp-credentials/(:segment)', '\App\Controllers\V1\SmtpCredentials::update/$1');
@@ -37,6 +39,7 @@ $routes->group('v1', ['filter' => 'bearer'], static function (RouteCollection $r
         $routes->post('dkim/generate', '\App\Controllers\V1\SendDomains::generate');
         $routes->post('send', '\App\Controllers\V1\Send::submit');
         $routes->get('send/submissions/(:segment)', '\App\Controllers\V1\Send::submission/$1');
+        $routes->get('send/messages', '\App\Controllers\V1\Send::messages');
         $routes->get('send/messages/(:segment)', '\App\Controllers\V1\Send::message/$1');
         $routes->get('send-profiles', '\App\Controllers\V1\SendProfiles::index');
         $routes->get('send-profiles/(:segment)', '\App\Controllers\V1\SendProfiles::show/$1');

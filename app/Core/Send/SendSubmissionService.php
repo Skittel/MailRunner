@@ -160,11 +160,12 @@ class SendSubmissionService
                 $rowId    = (int) $this->db->insertID();
                 $expires  = Time::inSeconds((int) $access['retry_seconds']);
                 $messages = [];
+                $seq      = SendSequence::take($this->db, count($rcpts));
                 foreach ($rcpts as $r) {
                     $mid = RandomId::publicId('mrm');
                     $this->db->table('send_messages')->insert([
                         'message_id' => $mid, 'submission_row_id' => $rowId, 'project_id' => $project['id'], 'profile_id' => $access['profile_row_id'],
-                        'recipient' => $r, 'recipient_domain' => SendProfileService::domainOf($r), 'status' => 'queued',
+                        'recipient' => $r, 'recipient_domain' => SendProfileService::domainOf($r), 'status' => 'queued', 'change_seq' => $seq++,
                         'retry_attempts' => $access['retry_attempts'], 'next_attempt_at' => $now, 'expires_at' => $expires,
                         'created_at' => $now, 'updated_at' => $now,
                     ]);

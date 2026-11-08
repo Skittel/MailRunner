@@ -3,6 +3,8 @@ Description=MailRunner: send webhook pings after new mail
 
 [Path]
 PathExists=/var/lib/mailrunner/webhook.request
+# send role: mr-sender (user mailrunner-send) after status changes
+PathExists=/var/lib/mailrunner/send/requests/webhook.request
 Unit=mailrunner-webhook.service
 
 [Install]
