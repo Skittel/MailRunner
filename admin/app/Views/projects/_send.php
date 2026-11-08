@@ -17,35 +17,10 @@ $central ??= ['central' => null, 'nodes' => []];
 $notice ??= null;
 $write = can_write();
 $base = '/projects/' . $project['public_id'] . '/send';
-$c = $central['central'];
 $queueLabels = ['waiting_test' => 'wartet auf Test', 'queued' => 'wartet', 'sending' => 'in Zustellung', 'deferred' => 'zurückgestellt'];
 $finalLabels = ['sent' => 'zugestellt', 'bounced' => 'Bounce', 'failed' => 'fehlgeschlagen'];
 ?>
-<div class="card-body border-bottom">
-    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
-        <div>
-            <h4 class="subheader mb-1">Zentrale Konfiguration</h4>
-            <?php if ($c === null): ?>
-            <div class="small text-secondary">Noch nicht übernommen. Der Admin übernimmt Domains, Profile und Zugänge bei der nächsten Abfrage der Node.</div>
-            <?php else: ?>
-            <div class="small">Übernommen <?= ago($c['imported_at']) ?><?= $c['source'] ? ' von <span class="mono">' . esc($c['source']) . '</span>' : '' ?>:
-                <?= (int) $c['counts']['domains'] ?> Domains, <?= (int) $c['counts']['profiles'] ?> Profile, <?= (int) $c['counts']['accesses'] ?> Zugänge.
-                DKIM-Schlüssel und Hashes verschlüsselt gespeichert, nie angezeigt.</div>
-            <?php endif ?>
-            <?php foreach ($nodes as $n): $st = $central['nodes'][$n['id'] ?? 0] ?? null; ?>
-            <div class="small mt-1"><span class="mono"><?= esc($n['node_key']) ?></span>
-                <?php if ($st === null): ?><span class="badge bg-secondary-lt">noch nicht abgeglichen</span>
-                <?php elseif ($st['error'] !== null): ?><span class="badge bg-red-lt">Fehler</span> <span class="text-red"><?= esc($st['error']) ?></span>
-                <?php elseif ($st['pending_hash'] !== null && $c !== null && $st['pending_hash'] === $c['hash'] && ! $st['in_sync']): ?><span class="badge bg-yellow-lt">wartet auf Freigabe an der Node</span>
-                <?php elseif ($st['in_sync']): ?><span class="badge bg-green-lt">synchron</span> <span class="text-secondary">seit <?= dt($st['synced_at']) ?></span>
-                <?php else: ?><span class="badge bg-orange-lt">weicht ab</span><?php endif ?>
-            </div>
-            <?php endforeach ?>
-            <?php if ($notice !== null): ?><div class="small mt-1 <?= $notice[0] === 'ok' ? 'text-green' : 'text-red' ?>"><?= esc($notice[1]) ?></div><?php endif ?>
-        </div>
-        <?php if ($write): ?><button class="btn btn-sm btn-outline-primary" hx-post="<?= $base ?>/sync" hx-target="#send">Jetzt abgleichen</button><?php endif ?>
-    </div>
-</div>
+<?= view('projects/_central', ['project' => $project + ['type' => 'send'], 'nodes' => $nodes, 'central' => $central, 'notice' => $notice]) ?>
 <?php foreach ($nodes as $ni => $n): $d = $n['data']; $own = $ni === 0; /* actions on access locks only on the project's node: the admin distributes them */ ?>
 <?php if (count($nodes) > 1): ?><div class="card-body border-bottom bg-light py-2 fw-bold"><?= esc($n['label']) ?> <span class="mono"><?= esc($n['node_key']) ?></span></div><?php endif ?>
 <?php if ($d === null): ?>

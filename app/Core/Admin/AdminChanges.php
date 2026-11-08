@@ -151,6 +151,46 @@ class AdminChanges
         return [substr($ref, 0, $pos), substr($ref, $pos + 1)];
     }
 
+    /**
+     * Access configuration from the admin (queued in manual mode, approved on the node), applied without if_hash: the
+     * operator approved exactly this set.
+     *
+     * @param array<string, mixed> $set
+     */
+    public function accessConfig(string $ref, array $set, ChangeContext $ctx): array
+    {
+        unset($set['if_hash']);
+
+        return service('accessConfigSync')->apply($ref, $set, null, $ctx);
+    }
+
+    /** @return array<string, mixed> */
+    public static function decryptAccessConfig(string $ref, array $payload): array
+    {
+        $json = \App\Core\Secrets\NodeCrypto::forNode()->decrypt((string) base64_decode((string) ($payload['enc'] ?? ''), true), 'admin-access-config:' . $ref);
+
+        return json_decode($json, true) ?: [];
+    }
+
+    /**
+     * Counts of a set for journal, queue and preview (never keys, hashes or the webhook URL).
+     *
+     * @param array<string, mixed> $set
+     *
+     * @return array<string, int>
+     */
+    public static function configCounts(array $set): array
+    {
+        $out = [];
+        foreach (['domains', 'profiles', 'accesses', 'smtp_credentials'] as $k) {
+            if (is_array($set[$k] ?? null)) {
+                $out[$k] = count($set[$k]);
+            }
+        }
+
+        return $out + ['webhook' => is_array($set['webhook'] ?? null) ? 1 : 0];
+    }
+
     /** @return array<string, mixed> */
     public static function decryptSendConfig(string $ref, array $payload): array
     {
@@ -161,6 +201,17 @@ class AdminChanges
 
     public function preview(string $kind, string $ref, array $body): array
     {
+        if ($kind === 'access_config') { // counts only, never keys, hashes or the webhook URL
+            $p    = service('projectService')->find($ref);
+            $now  = $p === null ? [] : self::configCounts(service('accessConfigSync')->snapshot($p));
+            $keys = array_intersect(['domains', 'profiles', 'accesses', 'smtp_credentials', 'webhook'], [...array_keys($now), ...array_keys($body)]);
+            $out  = [];
+            foreach ($keys as $k) {
+                $out[$k] = [$now[$k] ?? 0, (int) ($body[$k] ?? 0)];
+            }
+
+            return $out;
+        }
         if ($kind === 'send_config') { // counts only, never keys or hashes
             $p   = service('projectService')->find($ref);
             $now = $p === null ? ['domains' => [], 'profiles' => [], 'accesses' => []] : service('sendConfigSync')->snapshot((int) $p['id']);

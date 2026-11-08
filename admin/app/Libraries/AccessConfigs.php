@@ -6,7 +6,9 @@ use Closure;
 use Throwable;
 
 /**
- * Central send configuration of send projects (decision E-27): domains with DKIM key, send profiles and accesses.
+ * Central access configuration (decision E-27, node AccessConfigSync): what the customer's application sets up on a
+ * node. Send projects: domains with DKIM key, send profiles and accesses; receive projects: SMTP logins; both: the
+ * webhook. Tables send_configs / send_config_nodes keep their names from admin 0.1.31.
  *
  * The customer's application changes them over the API of any node of the project. Every node reports the hash of
  * its set. Per node the admin remembers the hash after the last sync:
@@ -17,7 +19,7 @@ use Throwable;
  * Two nodes changed at once: the later change wins (audit "send_config.conflict"). The set incl. DKIM private keys
  * and hashes is stored encrypted (Vault), never shown. Self test projects (system/...) stay local.
  */
-class SendConfigs
+class AccessConfigs
 {
     /** @var Closure(array): object */
     private readonly Closure $client;
@@ -33,12 +35,53 @@ class SendConfigs
         return $this->vault ?? Vault::make();
     }
 
-    /** Every send project the node belongs to (its node or the old node of a move). */
+    /**
+     * Every project the node belongs to (its node or the old node of a move). One project list call per node: only
+     * projects whose hash there differs from what the admin knows are reconciled (a node before 0.2.10: every send
+     * project, as before).
+     */
     public function reconcileNode(array $node): void
     {
-        foreach (db_connect()->table('projects p')->select('p.id')->join('customers c', 'c.id = p.customer_id')->where('p.type', 'send')
+        $db   = db_connect();
+        $rows = $db->table('projects p')->select('p.id, p.type, p.project_key, c.customer_key, s.hash AS central, k.hash AS known, k.pending_hash, k.error')
+            ->join('customers c', 'c.id = p.customer_id')
+            ->join('send_configs s', 's.project_id = p.id', 'left')
+            ->join('send_config_nodes k', 'k.project_id = p.id AND k.node_id = ' . (int) $node['id'], 'left')
             ->where('c.customer_key !=', Tokens::LOCAL_CUSTOMER)->groupStart()->where('p.node_id', $node['id'])->orWhere('p.move_from_node_id', $node['id'])->groupEnd()
-            ->get()->getResultArray() as $p) {
+            ->get()->getResultArray();
+        if ($rows === []) {
+            return;
+        }
+        $hashes = null;
+        try {
+            $hashes = [];
+            foreach (($this->client)($node)->ok('GET', 'projects')['data'] ?? [] as $r) {
+                if (array_key_exists('access_config_hash', $r)) {
+                    $hashes[$r['ref']] = $r['access_config_hash'];
+                }
+            }
+        } catch (Throwable) {
+            $hashes = null; // reconcile() notes the error per project
+        }
+        foreach ($rows as $p) {
+            $ref = $p['customer_key'] . '/' . $p['project_key'];
+            if ($hashes === null || $hashes === []) { // unreachable or older node
+                if ($p['type'] === 'send') {
+                    $this->reconcile((int) $p['id']);
+                }
+
+                continue;
+            }
+            if (! array_key_exists($ref, $hashes)) {
+                continue; // not on the node (yet): the project push creates it
+            }
+            $h = $hashes[$ref];
+            if ($p['central'] !== null && $h === $p['central'] && $h === $p['known'] && $p['error'] === null) {
+                continue; // in sync
+            }
+            if ($p['central'] !== null && $p['pending_hash'] === $p['central'] && $h === $p['known'] && $p['error'] === null) {
+                continue; // waits for approval on the node
+            }
             $this->reconcile((int) $p['id']);
         }
     }
@@ -52,7 +95,7 @@ class SendConfigs
         $db = db_connect();
         $p  = $db->table('projects p')->select('p.id, p.type, p.node_id, p.move_from_node_id, p.project_key, c.customer_key')
             ->join('customers c', 'c.id = p.customer_id')->where('p.id', $projectId)->get()->getRowArray();
-        if ($p === null || $p['type'] !== 'send' || $p['customer_key'] === Tokens::LOCAL_CUSTOMER) {
+        if ($p === null || $p['customer_key'] === Tokens::LOCAL_CUSTOMER) {
             return null;
         }
         $ref    = $p['customer_key'] . '/' . $p['project_key'];
@@ -65,10 +108,10 @@ class SendConfigs
         foreach ($nodes as $nid => $node) {
             try {
                 $d = ($this->client)($node)->ok('GET', 'projects/' . $ref)['data'];
-                if (! is_array($d['send_config'] ?? null)) {
-                    throw new \RuntimeException('Node zu alt für die zentrale Versand-Konfiguration (ab Node 0.2.8)');
+                if (! is_array($d['access_config'] ?? null)) {
+                    throw new \RuntimeException('Node zu alt für die zentrale Verteilung der Zugänge (ab Node 0.2.10)');
                 }
-                $state[$nid] = $d['send_config'];
+                $state[$nid] = $d['access_config'];
             } catch (Throwable $e) {
                 $errors[$nid] = self::message($e);
             }
@@ -221,7 +264,7 @@ class SendConfigs
     private function import(int $projectId, string $ref, array $node, array &$errors): ?array
     {
         try {
-            $d = ($this->client)($node)->ok('GET', 'projects/' . $ref . '/send-config')['data'];
+            $d = ($this->client)($node)->ok('GET', 'projects/' . $ref . '/access-config')['data'];
         } catch (Throwable $e) {
             $errors[(int) $node['id']] = 'Übernahme: ' . self::message($e);
 
@@ -229,7 +272,7 @@ class SendConfigs
         }
         $hash = (string) $d['hash'];
         unset($d['hash'], $d['changed_at']);
-        $counts = ['domains' => count($d['domains'] ?? []), 'profiles' => count($d['profiles'] ?? []), 'accesses' => count($d['accesses'] ?? [])];
+        $counts = self::counts($d);
         $row    = ['project_id' => $projectId, 'hash' => $hash, 'config_enc' => $this->vault()->encrypt(json_encode($d, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 'send-config:' . $projectId),
             'counts' => json_encode($counts), 'source_node_id' => (int) $node['id'], 'imported_at' => Clock::now()];
         db_connect()->table('send_configs')->replace($row);
@@ -244,7 +287,7 @@ class SendConfigs
     {
         $nid = (int) $node['id'];
         try {
-            $res = ($this->client)($node)->ok('PUT', 'projects/' . $ref . '/send-config', $this->set($central) + ['if_hash' => $ifHash]);
+            $res = ($this->client)($node)->ok('PUT', 'projects/' . $ref . '/access-config', $this->set($central) + ['if_hash' => $ifHash]);
         } catch (NodeError $e) {
             if ($e->errorCode === 'SEND_CONFIG_CHANGED') {
                 return; // changed on the node right now: the next run takes it over
@@ -300,6 +343,19 @@ class SendConfigs
         }
 
         return implode('; ', array_map(static fn ($nid, $m) => ($nodes[$nid]['node_key'] ?? '?') . ': ' . $m, array_keys($errors), $errors));
+    }
+
+    /** Counts of a set (never keys, hashes or the webhook URL). @param array<string, mixed> $set @return array<string, int> */
+    public static function counts(array $set): array
+    {
+        $out = [];
+        foreach (['domains', 'profiles', 'accesses', 'smtp_credentials'] as $k) {
+            if (is_array($set[$k] ?? null)) {
+                $out[$k] = count($set[$k]);
+            }
+        }
+
+        return $out + ['webhook' => is_array($set['webhook'] ?? null) ? 1 : 0];
     }
 
     private static function message(Throwable $e): string

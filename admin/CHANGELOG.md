@@ -4,6 +4,18 @@ Admin and node are versioned separately since 0.1.26: `admin/VERSION` with tags 
 `VERSION` with tags `v*` (`CHANGELOG.md` in the repository root). An admin release only offers node updates when
 the node version in the same checkout is newer. Up to 0.1.25 both shared one version: see `../CHANGELOG.md`.
 
+## 0.1.33 - 2026-11-08
+- Central distribution also for receive projects: the SMTP logins and the webhook the customer's application sets
+  up on a node are taken over (encrypted, like the send configuration) and put on the other nodes of the project;
+  the webhook of send projects as well. Needs node 0.2.10 (`access-config`).
+- A move of any project (not only send projects) starts only after the central copy exists and puts it on the new
+  node right away.
+- The poll asks every node once for its project list with the hash per project and reconciles only projects whose
+  hash changed (before: two calls per send project and minute).
+- Receive projects get the card "Zugänge der Anwendung": SMTP logins (user, networks, TLS, last use, state) and the
+  webhook (shortened URL, last delivery) per node, with the central state and "Jetzt abgleichen".
+- Library `SendConfigs` is now `AccessConfigs`; audit `access_config.sync_requested`.
+
 ## 0.1.32 - 2026-11-08
 - Send card, actions (users with write access): "Sperren" locks a send access with a reason (the customer sees the
   reason and cannot lift the lock), "Entsperren" lifts it. The lock is set on the project's node and distributed at

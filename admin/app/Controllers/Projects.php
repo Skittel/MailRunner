@@ -6,7 +6,7 @@ use App\Libraries\PublicId;
 
 use App\Libraries\Audit;
 use App\Libraries\Clock;
-use App\Libraries\SendConfigs;
+use App\Libraries\AccessConfigs;
 use App\Libraries\Sync;
 use App\Libraries\Tokens;
 use Throwable;
@@ -87,10 +87,10 @@ class Projects extends BaseController
         if (! $this->sync()->ensureTokens($id)) { // tokens must be central before the move: same bearer on both nodes
             return redirect()->to(site_url('projects/' . $pid))->with('error', 'Umzug nicht gestartet: Die Tokens der bisherigen Node konnten nicht übernommen werden (Node nicht erreichbar oder zu alt).');
         }
-        if ($p['type'] === 'send' && $p['customer_key'] !== Tokens::LOCAL_CUSTOMER) { // the send configuration must be central before the move
-            $sendErr = (new SendConfigs())->reconcile($id);
+        if ($p['customer_key'] !== Tokens::LOCAL_CUSTOMER) { // logins, accesses, keys and webhook must be central before the move
+            $sendErr = (new AccessConfigs())->reconcile($id);
             if (db_connect()->table('send_configs')->where('project_id', $id)->countAllResults() === 0) {
-                return redirect()->to(site_url('projects/' . $pid))->with('error', 'Umzug nicht gestartet: Die Versand-Konfiguration der bisherigen Node konnte nicht übernommen werden' . ($sendErr ? ' (' . $sendErr . ')' : '') . '.');
+                return redirect()->to(site_url('projects/' . $pid))->with('error', 'Umzug nicht gestartet: Die Zugänge der bisherigen Node konnten nicht übernommen werden' . ($sendErr ? ' (' . $sendErr . ')' : '') . '.');
             }
         }
         $db = db_connect();
@@ -104,8 +104,8 @@ class Projects extends BaseController
             return redirect()->to(site_url('projects/' . $pid))->with('error', 'Umzug nicht gestartet, neue Node meldet: ' . $err);
         }
         Audit::log('project.move_started', $ref, ['from' => (int) $p['node_id'], 'to' => $target]);
-        if ($p['type'] === 'send' && ($sendErr = (new SendConfigs())->reconcile($id)) !== null) { // domains, profiles, accesses to the new node
-            return redirect()->to(site_url('projects/' . $pid))->with('error', 'Projekt auf der neuen Node angelegt, Versand-Konfiguration noch nicht übertragen: ' . $sendErr);
+        if ($p['customer_key'] !== Tokens::LOCAL_CUSTOMER && ($sendErr = (new AccessConfigs())->reconcile($id)) !== null) { // to the new node
+            return redirect()->to(site_url('projects/' . $pid))->with('error', 'Projekt auf der neuen Node angelegt, Zugänge noch nicht übertragen: ' . $sendErr);
         }
 
         return redirect()->to(site_url('projects/' . $pid))->with('ok', 'Projekt auf der neuen Node angelegt. Die alte Node nimmt weiter an, bis du sie abschaltest.');
@@ -182,6 +182,27 @@ class Projects extends BaseController
         if (($p['type'] ?? 'receive') !== 'send') {
             return '';
         }
+
+        return view('projects/_send', ['project' => $p, 'nodes' => $this->liveNodes($p), 'central' => (new AccessConfigs())->overview((int) $p['id']), 'notice' => $notice]);
+    }
+
+    /**
+     * htmx partial of receive projects: SMTP logins and webhook of the customer's application per node, read live,
+     * with the state of the central copy.
+     */
+    public function access(string $pid, ?array $notice = null)
+    {
+        $p = $this->find(PublicId::id('projects', $pid));
+        if (($p['type'] ?? 'receive') === 'send') {
+            return '';
+        }
+
+        return view('projects/_access', ['project' => $p, 'nodes' => $this->liveNodes($p), 'central' => (new AccessConfigs())->overview((int) $p['id']), 'notice' => $notice]);
+    }
+
+    /** @return list<array{id: int, label: string, node_key: string, data: array|null}> own node first, then the old node of a move */
+    private function liveNodes(array $p): array
+    {
         $nodes = [];
         foreach (array_filter([(int) $p['node_id'] => 'Node', (int) ($p['move_from_node_id'] ?? 0) => 'alte Node']) as $nid => $label) {
             if ($nid === 0) {
@@ -191,17 +212,18 @@ class Projects extends BaseController
                 'data' => $this->sync()->projectOnNode((int) $p['id'], $nid)];
         }
 
-        return view('projects/_send', ['project' => $p, 'nodes' => $nodes, 'central' => (new SendConfigs())->overview((int) $p['id']), 'notice' => $notice]);
+        return $nodes;
     }
 
-    /** htmx: take the send configuration over / put it on every node now, then show the card again. */
-    public function sendSync(string $pid)
+    /** htmx: take the configuration over / put it on every node now, then show the project's card again. */
+    public function configSync(string $pid)
     {
         $p   = $this->find(PublicId::id('projects', $pid));
-        $err = (new SendConfigs())->reconcile((int) $p['id']);
-        Audit::log('send_config.sync_requested', $p['customer_key'] . '/' . $p['project_key'], ['error' => $err]);
+        $err = (new AccessConfigs())->reconcile((int) $p['id']);
+        Audit::log('access_config.sync_requested', $p['customer_key'] . '/' . $p['project_key'], ['error' => $err]);
+        $notice = $err === null ? ['ok', 'Abgeglichen.'] : ['error', 'Abgleich: ' . $err];
 
-        return $this->send($pid, $err === null ? ['ok', 'Abgeglichen.'] : ['error', 'Abgleich: ' . $err]);
+        return ($p['type'] ?? 'receive') === 'send' ? $this->send($pid, $notice) : $this->access($pid, $notice);
     }
 
     /** htmx: lock a send access (reason from the prompt, the customer sees it) on every node of the project. */
@@ -223,7 +245,7 @@ class Projects extends BaseController
     private function lockResult(string $pid, string $accessId, bool $locked, string $reason)
     {
         $p = $this->find(PublicId::id('projects', $pid));
-        $r = (new SendConfigs())->lockAccess((int) $p['id'], $accessId, $locked, $reason);
+        $r = (new AccessConfigs())->lockAccess((int) $p['id'], $accessId, $locked, $reason);
         $what = 'Zugang ' . $accessId . ($locked ? ' gesperrt' : ' entsperrt');
 
         return $this->send($pid, match (true) {
@@ -238,7 +260,7 @@ class Projects extends BaseController
     {
         $p      = $this->find(PublicId::id('projects', $pid));
         $nodeId = (int) db_connect()->table('nodes')->select('id')->where('node_key', (string) $this->request->getPost('node'))->get()->getRow('id');
-        $err    = (new SendConfigs())->requestDomainTest((int) $p['id'], $domain, $nodeId);
+        $err    = (new AccessConfigs())->requestDomainTest((int) $p['id'], $domain, $nodeId);
 
         return $this->send($pid, $err === null ? ['ok', 'Domain-Test für ' . $domain . ' angefordert; die Node startet ihn innerhalb einer Minute.'] : ['error', 'Domain-Test nicht angefordert: ' . $err]);
     }

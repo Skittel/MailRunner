@@ -2,6 +2,21 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
+## 0.2.10 - 2026-11-08
+Central distribution of receive projects (decision E-27, extended): SMTP logins and webhook.
+- `GET/PUT /admin/v1/projects/{customer}/{project}/access-config` for every project type (AccessConfigSync): send
+  projects as before (domains, profiles, accesses), receive projects `smtp_credentials` (same ids, usernames and
+  password hashes on every node, revoked logins are not part of the set), both `webhook` (`url`,
+  `cooldown_seconds`; only while one is set, so existing sets keep their hash). `send-config` stays as an alias for
+  admin 0.1.31-0.1.32. Journal `receive.config.exported` / `receive.config.synced` (counts only).
+- A webhook from the admin is applied without resolving its host on this node (the origin node checked it; the
+  sender checks it again at send time); literal non-public addresses are still refused.
+- Admin API: the project shows `access_config` (hash, last change) and for receive projects `smtp_credentials`
+  (no hashes); the project list carries `access_config_hash` per project, so the admin reconciles only projects
+  that changed.
+- Manual config mode: kind `access_config` (encrypted with the node key, preview shows counts). Migration:
+  `admin_pending_changes.kind` gains `access_config`.
+
 ## 0.2.9 - 2026-11-08
 Send role: admin actions (decision E-27).
 - Admin lock of a send access: `PUT /admin/v1/projects/{customer}/{project}/send-accesses/{access_id}/lock`

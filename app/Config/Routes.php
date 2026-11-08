@@ -73,8 +73,10 @@ $routes->group('admin/v1', ['filter' => 'admincert'], static function (RouteColl
     $routes->get('projects/(:segment)/(:segment)', '\App\Controllers\Admin\V1\Projects::show/$1/$2');
     $routes->put('projects/(:segment)/(:segment)', '\App\Controllers\Admin\V1\Projects::put/$1/$2');
     $routes->post('projects/(:segment)/(:segment)/tokens', '\App\Controllers\Admin\V1\Projects::createToken/$1/$2');
-    $routes->get('projects/(:segment)/(:segment)/send-config', '\App\Controllers\Admin\V1\Projects::sendConfig/$1/$2');
-    $routes->put('projects/(:segment)/(:segment)/send-config', '\App\Controllers\Admin\V1\Projects::putSendConfig/$1/$2');
+    $routes->get('projects/(:segment)/(:segment)/access-config', '\App\Controllers\Admin\V1\Projects::accessConfig/$1/$2');
+    $routes->put('projects/(:segment)/(:segment)/access-config', '\App\Controllers\Admin\V1\Projects::putAccessConfig/$1/$2');
+    $routes->get('projects/(:segment)/(:segment)/send-config', '\App\Controllers\Admin\V1\Projects::accessConfig/$1/$2'); // admin 0.1.31-0.1.32
+    $routes->put('projects/(:segment)/(:segment)/send-config', '\App\Controllers\Admin\V1\Projects::putAccessConfig/$1/$2');
     $routes->put('projects/(:segment)/(:segment)/send-accesses/(:segment)/lock', '\App\Controllers\Admin\V1\Projects::lockAccess/$1/$2/$3');
     $routes->delete('projects/(:segment)/(:segment)/send-accesses/(:segment)/lock', '\App\Controllers\Admin\V1\Projects::unlockAccess/$1/$2/$3');
     $routes->post('projects/(:segment)/(:segment)/domains/(:segment)/test', '\App\Controllers\Admin\V1\Projects::testDomain/$1/$2/$3');

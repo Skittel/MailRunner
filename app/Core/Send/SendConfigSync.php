@@ -145,68 +145,7 @@ class SendConfigSync
             if ($ifHash !== null && ! hash_equals($ifHash, $this->hash($projectId))) {
                 throw new ConfigException('SEND_CONFIG_CHANGED', 'The send configuration on this node changed since it was read; take it over first');
             }
-            $n = ['domains' => 0, 'profiles' => 0, 'accesses' => 0, 'removed' => 0];
-
-            // domains: same selector and key change nothing (the domain test of this node stays valid)
-            $want = [];
-            foreach ($set['domains'] as $d) {
-                if (! is_string($d['domain'] ?? null) || ! is_string($d['selector'] ?? null) || ! is_string($d['private_key'] ?? null)) {
-                    throw new ConfigException('INVALID_SEND_CONFIG', 'Every domain needs domain, selector and private_key');
-                }
-                $want[SendDomainService::normalize($d['domain'])] = true;
-                [$row, $changed] = $this->domains->set($projectId, $d['domain'], $d['selector'], $d['private_key'], $d['algorithm'] ?? null, $ctx);
-                if (isset($d['key_sha256']) && $row['key_sha256'] !== $d['key_sha256']) {
-                    throw new ConfigException('INVALID_SEND_CONFIG', 'Private key of ' . $row['domain'] . ' does not match key_sha256');
-                }
-                $n['domains'] += $changed ? 1 : 0;
-            }
-
-            // accesses of profiles that go away, then the profiles, then the domains
-            $wantAccess = array_column($set['accesses'], null, 'access_id');
-            foreach ($this->db->table('send_accesses a')->select('a.*')->where('a.project_id', $projectId)->get()->getResultArray() as $a) {
-                if (! isset($wantAccess[$a['access_id']])) {
-                    $this->accesses->revokeRow($a);
-                    $n['removed']++;
-                }
-            }
-            $wantProfiles = array_column($set['profiles'], null, 'name');
-            foreach ($this->profiles->list($projectId) as $p) {
-                if (! isset($wantProfiles[$p['name']])) {
-                    $this->profiles->delete($projectId, $p['name'], $ctx, $this->accesses);
-                    $n['removed']++;
-                }
-            }
-            foreach ($this->domains->list($projectId) as $d) {
-                if (! isset($want[$d['domain']])) {
-                    $this->domains->delete($projectId, $d['domain'], $ctx);
-                    $n['removed']++;
-                }
-            }
-
-            foreach ($set['profiles'] as $p) {
-                if (! is_string($p['name'] ?? null) || ! is_string($p['profile_id'] ?? null) || preg_match('/^mrp_[a-z0-9]{16}$/', $p['profile_id']) !== 1) {
-                    throw new ConfigException('INVALID_SEND_CONFIG', 'Every profile needs name and profile_id');
-                }
-                [$row, $changed] = $this->profiles->put($projectId, $p['name'], [
-                    'label' => $p['label'] ?? $p['name'], 'enabled' => (bool) ($p['enabled'] ?? true), 'senders' => $p['senders'] ?? null, 'recipients' => $p['recipients'] ?? null,
-                    'limit_hour' => $p['limit_hour'] ?? null, 'limit_day' => $p['limit_day'] ?? null,
-                    'retry' => ['attempts' => (int) ($p['retry_attempts'] ?? 0), 'max_minutes' => intdiv((int) ($p['retry_seconds'] ?? 0), 60)],
-                    'return_path_domain' => $p['return_path_domain'] ?? null, 'test_interval_hours' => $p['test_interval_hours'] ?? null,
-                ], $ctx);
-                if ($row['profile_id'] !== $p['profile_id']) { // same public id on every node
-                    if ($this->db->table('send_profiles')->where('profile_id', $p['profile_id'])->where('id !=', $row['id'])->countAllResults() > 0) {
-                        throw new ConfigException('SEND_CONFIG_CONFLICT', 'Profile id ' . $p['profile_id'] . ' belongs to another project on this node');
-                    }
-                    $this->db->table('send_profiles')->where('id', $row['id'])->update(['profile_id' => $p['profile_id']]);
-                    $changed = true;
-                }
-                $n['profiles'] += $changed ? 1 : 0;
-            }
-
-            foreach ($set['accesses'] as $a) {
-                $n['accesses'] += $this->putAccess($project, $a, $ctx) ? 1 : 0;
-            }
-
+            $n    = $this->applySet($project, $set, $ctx);
             $hash = $this->hash($projectId);
             if ($n !== ['domains' => 0, 'profiles' => 0, 'accesses' => 0, 'removed' => 0]) {
                 $this->journal->append('send.config.synced', $ctx, (int) $project['customer_id'], $projectId, $n + ['hash' => $hash]);
@@ -215,6 +154,87 @@ class SendConfigSync
 
             return ['hash' => $hash, 'changed' => $n];
         });
+    }
+
+    /**
+     * Applies domains, profiles and accesses inside the caller's transaction (project row locked). Returns the counts.
+     *
+     * @param array<string, mixed> $project
+     * @param array<string, mixed> $set
+     *
+     * @return array{domains: int, profiles: int, accesses: int, removed: int}
+     */
+    public function applySet(array $project, array $set, ChangeContext $ctx): array
+    {
+        foreach (['domains', 'profiles', 'accesses'] as $k) {
+            if (! is_array($set[$k] ?? null) || ! array_is_list($set[$k])) {
+                throw new ConfigException('INVALID_SEND_CONFIG', 'domains, profiles and accesses must be lists');
+            }
+        }
+        $projectId = (int) $project['id'];
+        $n = ['domains' => 0, 'profiles' => 0, 'accesses' => 0, 'removed' => 0];
+
+        // domains: same selector and key change nothing (the domain test of this node stays valid)
+        $want = [];
+        foreach ($set['domains'] as $d) {
+            if (! is_string($d['domain'] ?? null) || ! is_string($d['selector'] ?? null) || ! is_string($d['private_key'] ?? null)) {
+                throw new ConfigException('INVALID_SEND_CONFIG', 'Every domain needs domain, selector and private_key');
+            }
+            $want[SendDomainService::normalize($d['domain'])] = true;
+            [$row, $changed] = $this->domains->set($projectId, $d['domain'], $d['selector'], $d['private_key'], $d['algorithm'] ?? null, $ctx);
+            if (isset($d['key_sha256']) && $row['key_sha256'] !== $d['key_sha256']) {
+                throw new ConfigException('INVALID_SEND_CONFIG', 'Private key of ' . $row['domain'] . ' does not match key_sha256');
+            }
+            $n['domains'] += $changed ? 1 : 0;
+        }
+
+        // accesses of profiles that go away, then the profiles, then the domains
+        $wantAccess = array_column($set['accesses'], null, 'access_id');
+        foreach ($this->db->table('send_accesses a')->select('a.*')->where('a.project_id', $projectId)->get()->getResultArray() as $a) {
+            if (! isset($wantAccess[$a['access_id']])) {
+                $this->accesses->revokeRow($a);
+                $n['removed']++;
+            }
+        }
+        $wantProfiles = array_column($set['profiles'], null, 'name');
+        foreach ($this->profiles->list($projectId) as $p) {
+            if (! isset($wantProfiles[$p['name']])) {
+                $this->profiles->delete($projectId, $p['name'], $ctx, $this->accesses);
+                $n['removed']++;
+            }
+        }
+        foreach ($this->domains->list($projectId) as $d) {
+            if (! isset($want[$d['domain']])) {
+                $this->domains->delete($projectId, $d['domain'], $ctx);
+                $n['removed']++;
+            }
+        }
+
+        foreach ($set['profiles'] as $p) {
+            if (! is_string($p['name'] ?? null) || ! is_string($p['profile_id'] ?? null) || preg_match('/^mrp_[a-z0-9]{16}$/', $p['profile_id']) !== 1) {
+                throw new ConfigException('INVALID_SEND_CONFIG', 'Every profile needs name and profile_id');
+            }
+            [$row, $changed] = $this->profiles->put($projectId, $p['name'], [
+                'label' => $p['label'] ?? $p['name'], 'enabled' => (bool) ($p['enabled'] ?? true), 'senders' => $p['senders'] ?? null, 'recipients' => $p['recipients'] ?? null,
+                'limit_hour' => $p['limit_hour'] ?? null, 'limit_day' => $p['limit_day'] ?? null,
+                'retry' => ['attempts' => (int) ($p['retry_attempts'] ?? 0), 'max_minutes' => intdiv((int) ($p['retry_seconds'] ?? 0), 60)],
+                'return_path_domain' => $p['return_path_domain'] ?? null, 'test_interval_hours' => $p['test_interval_hours'] ?? null,
+            ], $ctx);
+            if ($row['profile_id'] !== $p['profile_id']) { // same public id on every node
+                if ($this->db->table('send_profiles')->where('profile_id', $p['profile_id'])->where('id !=', $row['id'])->countAllResults() > 0) {
+                    throw new ConfigException('SEND_CONFIG_CONFLICT', 'Profile id ' . $p['profile_id'] . ' belongs to another project on this node');
+                }
+                $this->db->table('send_profiles')->where('id', $row['id'])->update(['profile_id' => $p['profile_id']]);
+                $changed = true;
+            }
+            $n['profiles'] += $changed ? 1 : 0;
+        }
+
+        foreach ($set['accesses'] as $a) {
+            $n['accesses'] += $this->putAccess($project, $a, $ctx) ? 1 : 0;
+        }
+
+        return $n;
     }
 
     /**
@@ -312,8 +332,13 @@ class SendConfigSync
         return (int) $cur['id'];
     }
 
-    /** SMTP login of a send access with the given id and password hash; returns the row id. @param array<string, mixed> $c */
-    private function putCredential(int $projectId, array $c, bool $enabled): int
+    /**
+     * SMTP login with the given id and password hash (send access, or with scope receive a receive login); returns the
+     * row id. A revoked login stays revoked.
+     *
+     * @param array<string, mixed> $c
+     */
+    public function putCredential(int $projectId, array $c, bool $enabled, string $scope = 'send'): int
     {
         if (preg_match('/^mrc_[a-z0-9]{16}$/', (string) ($c['credential_id'] ?? '')) !== 1 || ! is_string($c['username'] ?? null) || $c['username'] === ''
             || ! is_string($c['password_hash'] ?? null) || ! str_starts_with($c['password_hash'], '$argon2id$')) {
@@ -323,10 +348,11 @@ class SendConfigSync
         $want     = ['username' => $c['username'], 'label' => mb_substr((string) ($c['label'] ?? $c['username']), 0, 100), 'password_hash' => $c['password_hash'],
             'previous_password_hash' => is_string($c['previous_password_hash'] ?? null) ? $c['previous_password_hash'] : null,
             'previous_valid_until' => self::time($c['previous_valid_until'] ?? null), 'tls_required' => ! empty($c['tls_required']) ? 1 : 0,
-            'allowed_networks' => is_array($networks) ? json_encode(array_values($networks)) : null, 'enabled' => $enabled ? 1 : 0];
+            'allowed_networks' => is_array($networks) ? json_encode(array_values($networks)) : null, 'enabled' => $enabled ? 1 : 0]
+            + ($scope === 'receive' ? ['password_change_required' => ! empty($c['password_change_required']) ? 1 : 0] : []);
         $cur = $this->db->table('smtp_credentials')->where('credential_id', $c['credential_id'])->get()->getRowArray();
         $now = Time::now();
-        if ($cur !== null && ((int) $cur['project_id'] !== $projectId || $cur['scope'] !== 'send')) {
+        if ($cur !== null && ((int) $cur['project_id'] !== $projectId || $cur['scope'] !== $scope)) {
             throw new ConfigException('SEND_CONFIG_CONFLICT', 'SMTP login ' . $c['credential_id'] . ' belongs to another project on this node');
         }
         $this->db->table('smtp_credentials')->where('username', $want['username'])->where('revoked_at IS NOT NULL')->where('credential_id !=', $c['credential_id'])->delete();
@@ -334,7 +360,7 @@ class SendConfigSync
             throw new ConfigException('USERNAME_EXISTS', 'SMTP username "' . $want['username'] . '" already exists on this node');
         }
         if ($cur === null) {
-            $this->db->table('smtp_credentials')->insert($want + ['credential_id' => $c['credential_id'], 'project_id' => $projectId, 'scope' => 'send',
+            $this->db->table('smtp_credentials')->insert($want + ['credential_id' => $c['credential_id'], 'project_id' => $projectId, 'scope' => $scope,
                 'created_at' => $now, 'updated_at' => $now]);
 
             return (int) $this->db->insertID();

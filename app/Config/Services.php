@@ -116,6 +116,15 @@ class Services extends BaseService
             static::sendProfileService(), static::apiTokenService(), static::smtpCredentialService());
     }
 
+    public static function accessConfigSync(bool $getShared = true): \App\Core\Access\AccessConfigSync
+    {
+        if ($getShared) {
+            return static::getSharedInstance('accessConfigSync');
+        }
+
+        return new \App\Core\Access\AccessConfigSync(db_connect(), static::journalWriter(), static::sendConfigSync(), static::webhookService(), static::projectService());
+    }
+
     public static function sendConfigSync(bool $getShared = true): \App\Core\Send\SendConfigSync
     {
         if ($getShared) {

@@ -129,6 +129,15 @@ $this->setVar('pretitle', '<a href="/customers/' . $customer['public_id'] . '">'
     <div id="tokens" hx-get="/projects/<?= $project['public_id'] ?>/tokens" hx-trigger="load"><div class="card-body text-secondary">Lädt …</div></div></div>
 </div>
 <?php endif ?>
+<?php if (! $isNew && $type !== 'send' && $customer['customer_key'] !== 'system'): ?>
+<div class="col-12">
+<div class="card"><div class="card-header"><h3 class="card-title">Zugänge der Anwendung</h3>
+    <div class="card-actions"><button class="btn btn-sm btn-outline-secondary" hx-get="/projects/<?= $project['public_id'] ?>/access" hx-target="#access" hx-indicator="#access-spin">Aktualisieren <span id="access-spin" class="htmx-indicator spinner-border spinner-border-sm ms-1"></span></button></div></div>
+    <div id="access" hx-get="/projects/<?= $project['public_id'] ?>/access" hx-trigger="load"><div class="card-body text-secondary">Lädt von der Node …</div></div>
+    <div class="card-footer small text-secondary">SMTP-Zugänge und Webhook legt die Anwendung des Kunden per API auf einer Node an; der Admin verteilt sie an alle Nodes des Projekts.</div>
+</div>
+</div>
+<?php endif ?>
 <?php if (! $isNew && $type === 'send'): ?>
 <div class="col-12">
 <div class="card"><div class="card-header"><h3 class="card-title">Versand</h3>

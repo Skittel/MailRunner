@@ -327,8 +327,13 @@ final class PagesTest extends CIUnitTestCase
         $this->postAs('projects/pr0j-0001/move', ['node_id' => 'n0de-0002'])->assertRedirect();
         $this->seeInDatabase('projects', ['public_id' => 'pr0j-0001', 'node_id' => 1, 'move_from_node_id' => null]);
         $this->dontSeeInDatabase('audit_log', ['action' => 'project.move_failed']);
-        // tokens central, but the new node is unreachable: the move is not started and nothing changes
+        // tokens central, but the logins and webhook of the old node are not (unreachable): no move either
         $this->db->table('projects')->where('id', 1)->update(['tokens_imported_at' => $now]);
+        $this->postAs('projects/pr0j-0001/move', ['node_id' => 'n0de-0002'])->assertRedirect();
+        $this->seeInDatabase('projects', ['public_id' => 'pr0j-0001', 'node_id' => 1, 'move_from_node_id' => null]);
+        $this->dontSeeInDatabase('audit_log', ['action' => 'project.move_failed']);
+        // both central, but the new node is unreachable: the move is not started and nothing changes
+        $this->db->table('send_configs')->insert(['project_id' => 1, 'hash' => str_repeat('0', 64), 'config_enc' => 'x', 'counts' => '{}', 'source_node_id' => 1, 'imported_at' => $now]);
         $r = $this->postAs('projects/pr0j-0001/move', ['node_id' => 'n0de-0002']);
         $r->assertRedirect();
         $this->seeInDatabase('projects', ['public_id' => 'pr0j-0001', 'node_id' => 1, 'move_from_node_id' => null]);

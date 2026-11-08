@@ -48,7 +48,9 @@ $routes->group('', ['filter' => 'adminauth'], static function (RouteCollection $
     $routes->post('projects/(:pid)/move/finish', 'Projects::moveFinish/$1');
     $routes->post('projects/(:pid)/move/cancel', 'Projects::moveCancel/$1');
     $routes->get('projects/(:pid)/send', 'Projects::send/$1');
-    $routes->post('projects/(:pid)/send/sync', 'Projects::sendSync/$1');
+    $routes->post('projects/(:pid)/send/sync', 'Projects::configSync/$1'); // pages opened before admin 0.1.33
+    $routes->post('projects/(:pid)/config/sync', 'Projects::configSync/$1');
+    $routes->get('projects/(:pid)/access', 'Projects::access/$1');
     $routes->post('projects/(:pid)/send/accesses/(:segment)/lock', 'Projects::sendLock/$1/$2');
     $routes->post('projects/(:pid)/send/accesses/(:segment)/unlock', 'Projects::sendUnlock/$1/$2');
     $routes->post('projects/(:pid)/send/domains/(:segment)/test', 'Projects::sendDomainTest/$1/$2');

@@ -3,7 +3,7 @@
 namespace Tests\Feature;
 
 use App\Libraries\NodeError;
-use App\Libraries\SendConfigs;
+use App\Libraries\AccessConfigs;
 use App\Libraries\Vault;
 use CodeIgniter\Test\CIUnitTestCase;
 use CodeIgniter\Test\DatabaseTestTrait;
@@ -16,11 +16,12 @@ final class FakeSendNode
     public bool $manual   = false;
     public bool $down     = false;
     public array $calls   = [];
+    public string $ref    = 'acme/mailer';
 
     public function hash(): string
     {
         $s = $this->set;
-        foreach ($s['domains'] as $i => $d) {
+        foreach ($s['domains'] ?? [] as $i => $d) {
             unset($s['domains'][$i]['private_key']);
         }
 
@@ -33,9 +34,12 @@ final class FakeSendNode
         if ($this->down) {
             throw new \RuntimeException('connection refused');
         }
+        if ($method === 'GET' && $path === 'projects') { // project list with the hash per project (node 0.2.10)
+            return ['data' => [['ref' => $this->ref, 'access_config_hash' => $this->hash()], ['ref' => 'system/selftest', 'access_config_hash' => null]]];
+        }
         if ($method === 'GET') {
-            return str_ends_with($path, '/send-config') ? ['data' => $this->set + ['hash' => $this->hash(), 'changed_at' => $this->changedAt]]
-                : ['data' => ['send_config' => ['hash' => $this->hash(), 'changed_at' => $this->changedAt]]];
+            return str_ends_with($path, '/access-config') ? ['data' => $this->set + ['hash' => $this->hash(), 'changed_at' => $this->changedAt]]
+                : ['data' => ['access_config' => ['hash' => $this->hash(), 'changed_at' => $this->changedAt]]];
         }
         if (preg_match('~/send-accesses/(mra_\w+)/lock$~', $path, $m) === 1) { // admin lock, like SendAccessService::lock
             if ($this->manual) {
@@ -80,7 +84,7 @@ final class FakeSendNode
  *
  * @internal
  */
-final class SendConfigsTest extends CIUnitTestCase
+final class AccessConfigsTest extends CIUnitTestCase
 {
     use DatabaseTestTrait;
 
@@ -120,9 +124,9 @@ final class SendConfigsTest extends CIUnitTestCase
         @unlink($this->keyFile);
     }
 
-    private function configs(): SendConfigs
+    private function configs(): AccessConfigs
     {
-        return new SendConfigs(fn (array $node) => $this->nodes[(int) $node['id']], $this->vault);
+        return new AccessConfigs(fn (array $node) => $this->nodes[(int) $node['id']], $this->vault);
     }
 
     private function startMove(): void
@@ -136,7 +140,7 @@ final class SendConfigsTest extends CIUnitTestCase
         $row = $this->db->table('send_configs')->where('project_id', 1)->get()->getRowArray();
         $this->assertSame($this->nodes[1]->hash(), $row['hash']);
         $this->assertStringNotContainsString('SECRET', $row['config_enc'], 'stored encrypted');
-        $this->assertSame(['domains' => 1, 'profiles' => 1, 'accesses' => 1], json_decode($row['counts'], true));
+        $this->assertSame(['domains' => 1, 'profiles' => 1, 'accesses' => 1, 'webhook' => 0], json_decode($row['counts'], true));
 
         $this->startMove();
         $this->assertNull($this->configs()->reconcile(1));
@@ -292,5 +296,46 @@ final class SendConfigsTest extends CIUnitTestCase
         $html = $render();
         $this->assertStringContainsString('vom Betreiber gesperrt', $html);
         $this->assertStringNotContainsString('hx-post', $html);
+    }
+
+    public function testPollReconcilesOnlyChangedProjectsAndReceiveProjectsToo(): void
+    {
+        $this->configs()->reconcileNode($this->db->table('nodes')->where('id', 1)->get()->getRowArray());
+        $this->assertNotNull($this->db->table('send_configs')->where('project_id', 1)->get()->getRow('hash'), 'first poll takes over');
+        $calls = count($this->nodes[1]->calls);
+        $this->configs()->reconcileNode($this->db->table('nodes')->where('id', 1)->get()->getRowArray());
+        $this->assertSame(['GET projects'], array_slice($this->nodes[1]->calls, $calls), 'in sync: only the project list');
+
+        // a receive project with SMTP logins and webhook moves to node2
+        $this->db->table('projects')->where('id', 1)->update(['type' => 'receive', 'profile' => 'checked_auth']);
+        $this->db->table('send_configs')->delete(['project_id' => 1]);
+        $this->db->table('send_config_nodes')->delete(['project_id' => 1]);
+        $this->nodes[1]->set = ['smtp_credentials' => [['credential_id' => 'mrc_aaaaaaaaaaaaaaaa', 'username' => 'printer-1', 'password_hash' => '$argon2id$SECRET-HASH']],
+            'webhook' => ['url' => 'https://app.example.com/hooks/SECRET-PATH', 'cooldown_seconds' => 2]];
+        $this->assertNull($this->configs()->reconcile(1));
+        $this->assertSame(['smtp_credentials' => 1, 'webhook' => 1], json_decode($this->db->table('send_configs')->select('counts')->get()->getRow('counts'), true));
+        $this->startMove();
+        $this->assertNull($this->configs()->reconcile(1));
+        $this->assertSame($this->nodes[1]->set, $this->nodes[2]->set);
+        $this->assertStringNotContainsString('SECRET', (string) $this->db->table('send_configs')->select('config_enc')->get()->getRow('config_enc'));
+
+        // the customer changes the webhook on the old node: the poll of that node takes it over
+        $this->nodes[1]->set['webhook']['cooldown_seconds'] = 10;
+        $this->nodes[1]->changedAt = '2026-11-08T15:00:00.000000Z';
+        $this->configs()->reconcileNode($this->db->table('nodes')->where('id', 1)->get()->getRowArray());
+        $this->assertSame(10, $this->nodes[2]->set['webhook']['cooldown_seconds']);
+
+        // the card of a receive project (never a hash or the full URL)
+        helper('admin');
+        session()->set('access', 'rw');
+        $html = view('projects/_access', ['project' => ['public_id' => 'pr0j-0002', 'type' => 'receive', 'profile' => 'checked_auth'], 'central' => $this->configs()->overview(1),
+            'nodes' => [['id' => 2, 'label' => 'Node', 'node_key' => 'node2.eu', 'data' => [
+                'smtp_credentials' => [['credential_id' => 'mrc_aaaaaaaaaaaaaaaa', 'username' => 'printer-1', 'label' => 'Printer', 'enabled' => true, 'tls_required' => false,
+                    'allowed_networks' => ['198.51.100.0/24'], 'password_change_required' => false, 'previous_valid_until' => null, 'created_at' => null, 'last_used_at' => null]],
+                'webhook' => ['url' => 'https://app.example.com/…PATH', 'cooldown_seconds' => 10, 'last_status' => 'failed', 'last_http_code' => 500, 'last_attempt_at' => null, 'last_error' => 'HTTP 500']]]]]);
+        foreach (['1 SMTP-Zugänge, Webhook gesetzt', 'synchron', 'printer-1', 'ohne TLS', '198.51.100.0/24', 'https://app.example.com/…PATH', 'HTTP 500', '/projects/pr0j-0002/config/sync', '#access'] as $t) {
+            $this->assertStringContainsString($t, $html, $t);
+        }
+        $this->assertStringNotContainsString('SECRET', $html);
     }
 }

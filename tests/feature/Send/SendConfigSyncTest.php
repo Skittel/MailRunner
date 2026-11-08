@@ -203,11 +203,11 @@ final class SendConfigSyncTest extends CIUnitTestCase
         unset($set['hash'], $set['changed_at']);
         [$s, $q] = $admin('put', 'admin/v1/projects/acme/mailer/send-config', $set);
         $this->assertSame(202, $s);
-        $payload = (string) db_connect()->table('admin_pending_changes')->where('kind', 'send_config')->get()->getRow('payload');
+        $payload = (string) db_connect()->table('admin_pending_changes')->where('kind', 'access_config')->get()->getRow('payload');
         $this->assertStringNotContainsString($key, $payload);
         $this->assertStringNotContainsString('argon2id', $payload);
         $pending = new \App\Core\Admin\PendingChanges();
-        $this->assertSame(['domains' => [1, 1], 'profiles' => [1, 1], 'accesses' => [3, 3]], (new \App\Core\Admin\AdminChanges())->preview('send_config', 'acme/mailer', json_decode($payload, true)));
+        $this->assertSame(['domains' => [1, 1], 'profiles' => [1, 1], 'accesses' => [3, 3], 'webhook' => [0, 0]], (new \App\Core\Admin\AdminChanges())->preview('access_config', 'acme/mailer', json_decode($payload, true)));
         $this->wipe();
         $this->assertNull($pending->apply($pending->open()[0], 'operator'));
         $this->assertSame($exp['data']['hash'], $this->sync()->hash($this->pid));
@@ -316,5 +316,27 @@ final class SendConfigSyncTest extends CIUnitTestCase
         $this->assertNotNull(db_connect()->table('send_domains')->where('project_id', $this->pid)->get()->getRow('test_requested_at'));
         [$s, $err] = $this->admin('post', 'admin/v1/projects/acme/mailer/domains/other.example/test');
         $this->assertSame([404, 'DOMAIN_NOT_FOUND'], [$s, $err['error']['code']]);
+    }
+
+    public function testSendSetWithWebhookKeepsTheOldHashWithoutOne(): void
+    {
+        $sync    = service('accessConfigSync');
+        $project = service('projectService')->get('acme/mailer');
+        $this->assertSame($this->sync()->hash($this->pid), $sync->hash($project), 'without webhook: hash of node 0.2.8/0.2.9');
+
+        Services::injectMock('webhookService', new \App\Core\Webhooks\WebhookService(db_connect(), service('journalWriter'), null, static fn (string $host): array => ['93.184.216.34']));
+        Services::resetSingle('accessConfigSync');
+        $sync = service('accessConfigSync');
+        service('webhookService')->set($this->pid, 'https://app.example.com/delivery', 3, ChangeContext::cli());
+        $set  = $sync->snapshot($project, true);
+        $hash = $sync->hash($project);
+        $this->assertSame(['url' => 'https://app.example.com/delivery', 'cooldown_seconds' => 3], $set['webhook']);
+        $this->assertNotSame($this->sync()->hash($this->pid), $hash);
+
+        $this->wipe();
+        db_connect()->table('project_webhooks')->where('project_id', $this->pid)->delete();
+        $r = $sync->apply('acme/mailer', $set, null, new ChangeContext('admin', 'a'));
+        $this->assertSame($hash, $r['hash']);
+        $this->assertSame(['domains' => 1, 'profiles' => 1, 'accesses' => 3, 'removed' => 0, 'webhook' => 1], $r['changed']);
     }
 }

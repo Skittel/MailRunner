@@ -46,16 +46,19 @@ class WebhookService
     }
 
     /**
+     * $resolve = false (central distribution from MailRunner Admin): the host is not resolved here; the origin node
+     * checked it and WebhookSender checks it again at send time.
+     *
      * @return array{0: array<string, mixed>, 1: bool} [webhook, changed]
      */
-    public function set(int $projectId, string $url, ?int $cooldown, ChangeContext $ctx): array
+    public function set(int $projectId, string $url, ?int $cooldown, ChangeContext $ctx, bool $resolve = true): array
     {
         $url      = trim($url);
         $cooldown ??= self::DEFAULT_COOLDOWN;
         if ($cooldown < self::MIN_COOLDOWN || $cooldown > self::MAX_COOLDOWN) {
             throw new ConfigException('INVALID_REQUEST', sprintf('cooldown_seconds must be %d-%d', self::MIN_COOLDOWN, self::MAX_COOLDOWN));
         }
-        $this->resolveTarget($url); // throws INVALID_WEBHOOK_URL
+        $this->resolveTarget($url, $resolve); // throws INVALID_WEBHOOK_URL
 
         return Transaction::run($this->db, function () use ($projectId, $url, $cooldown, $ctx): array {
             $this->lockProject($projectId); // parallel PUTs of one project run one after the other (first insert raced)
@@ -120,7 +123,7 @@ class WebhookService
      *
      * @return array{host: string, port: int, ips: list<string>}
      */
-    public function resolveTarget(string $url): array
+    public function resolveTarget(string $url, bool $resolve = true): array
     {
         $fail = static fn (string $why) => new ConfigException('INVALID_WEBHOOK_URL', $why);
         if ($url === '' || strlen($url) > self::MAX_URL || preg_match('/[\x00-\x20\x7f]/', $url) === 1) {
@@ -139,6 +142,9 @@ class WebhookService
         $host = strtolower(rtrim(trim($p['host'], '[]'), '.'));
         if ($host === 'localhost' || str_ends_with($host, '.localhost') || str_ends_with($host, '.local') || str_ends_with($host, '.internal')) {
             throw $fail('local host names are not allowed');
+        }
+        if (! $resolve && filter_var($host, FILTER_VALIDATE_IP) === false) {
+            return ['host' => $host, 'port' => 443, 'ips' => []];
         }
         $ips = filter_var($host, FILTER_VALIDATE_IP) !== false ? [$host] : ($this->resolver)($host);
         if ($ips === []) {

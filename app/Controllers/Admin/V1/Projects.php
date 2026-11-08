@@ -18,10 +18,12 @@ use App\Core\Support\Time;
  *         "tokens": [{"token_id", "label", "secret_hash", "created_at", "expires_at", "revoked_at"}, ...]}
  *        "tokens" (optional) is the full central token set of the project: see ApiTokenService::sync()
  * POST   /admin/v1/projects/{customer}/{project}/tokens   {"label": "...", "expires_days": 90} -> secret once
- * GET    /admin/v1/projects/{customer}/{project}/send-config   send configuration WITH secrets (DKIM private keys, token
- *        and password hashes) for the central copy in MailRunner Admin; journal send.config.exported
- * PUT    /admin/v1/projects/{customer}/{project}/send-config   {"domains", "profiles", "accesses", "if_hash"?}: makes the
- *        node's set equal (409 SEND_CONFIG_CHANGED if it changed since if_hash); manual mode: queued (keys encrypted)
+ * GET    /admin/v1/projects/{customer}/{project}/access-config   what the customer's application set up, WITH secrets,
+ *        for the central copy in MailRunner Admin (AccessConfigSync): send projects domains (DKIM private keys),
+ *        profiles, accesses; receive projects smtp_credentials (password hashes); both webhook (only while set).
+ *        Journal config.exported. Alias send-config (admin 0.1.31-0.1.32).
+ * PUT    /admin/v1/projects/{customer}/{project}/access-config   {the set, "if_hash"?}: makes the node's set equal
+ *        (409 SEND_CONFIG_CHANGED if it changed since if_hash); manual mode: queued (encrypted with the node key)
  * PUT    /admin/v1/projects/{customer}/{project}/send-accesses/{access_id}/lock   {"reason": "..."}: admin lock, the
  *        customer cannot lift it; DELETE lifts it. Manual mode: queued (kind send_access_lock)
  * POST   /admin/v1/projects/{customer}/{project}/domains/{domain}/test   brings this node's domain test forward
@@ -41,7 +43,10 @@ class Projects extends AdminController
             $routes[(int) $r['project_id']][] = $r['route'];
         }
 
-        return ApiResponse::ok(['data' => array_map(static fn ($p) => self::present($p, $routes[(int) $p['id']] ?? []), service('projectService')->list())]);
+        $sync = service('accessConfigSync'); // hash per project: the admin reconciles only projects that changed
+
+        return ApiResponse::ok(['data' => array_map(static fn ($p) => self::present($p, $routes[(int) $p['id']] ?? [])
+            + ['access_config_hash' => $p['customer_key'] === \App\Core\Access\ApiTokenService::LOCAL_CUSTOMER ? null : $sync->hash($p)], service('projectService')->list())]);
     }
 
     /**
@@ -88,7 +93,14 @@ class Projects extends AdminController
                 'domains' => $p['type'] === 'send' ? array_map(static fn ($d) => \App\Core\Send\SendDomainService::present($d, $p), service('sendDomainService')->list((int) $p['id'])) : null,
                 'send_profiles' => $p['type'] === 'send' ? self::sendProfiles($p) : null,
                 'send_queue' => $p['type'] === 'send' ? self::sendQueue((int) $p['id']) : null,
-                'send_config' => $p['type'] === 'send' ? ['hash' => service('sendConfigSync')->hash((int) $p['id']), 'changed_at' => service('sendConfigSync')->changedAt((int) $p['id'])] : null,
+                'access_config' => $config = ['hash' => service('accessConfigSync')->hash($p), 'changed_at' => service('accessConfigSync')->changedAt($p)],
+                'send_config' => $p['type'] === 'send' ? $config : null, // admin 0.1.31-0.1.32
+                'smtp_credentials' => $p['type'] === 'send' ? null : array_map(static fn ($c) => [
+                    'credential_id' => $c['credential_id'], 'username' => $c['username'], 'label' => $c['label'], 'enabled' => (bool) $c['enabled'],
+                    'tls_required' => (bool) $c['tls_required'], 'allowed_networks' => $c['allowed_networks'] === null ? null : json_decode($c['allowed_networks'], true),
+                    'password_change_required' => (bool) $c['password_change_required'], 'previous_valid_until' => Time::toIso($c['previous_valid_until']),
+                    'created_at' => Time::toIso($c['created_at']), 'last_used_at' => Time::toIso($c['last_used_at']),
+                ], array_values(array_filter(service('smtpCredentialService')->list($ref), static fn ($c) => $c['revoked_at'] === null))),
                 'tokens_central' => (int) ($p['tokens_central'] ?? 0) === 1,
                 'webhook' => \App\Core\Webhooks\WebhookService::present(service('webhookService')->get((int) $p['id'])), // set by the customer (PUT /v1/webhook)
                 'tokens' => array_map(static fn ($t) => [
@@ -130,37 +142,35 @@ class Projects extends AdminController
         });
     }
 
-    public function sendConfig(string $customer, string $project)
+    public function accessConfig(string $customer, string $project)
     {
         return $this->guard(function () use ($customer, $project) {
-            $p = $this->sendProjectRow($customer . '/' . $project);
-            $sync = service('sendConfigSync');
-            $set  = $sync->snapshot((int) $p['id'], true);
-            \App\Core\Support\Transaction::run(db_connect(), fn () => service('journalWriter')->append('send.config.exported', $this->ctx(), (int) $p['customer_id'], (int) $p['id'], [
-                'domains' => count($set['domains']), 'profiles' => count($set['profiles']), 'accesses' => count($set['accesses']),
-            ]));
+            $p      = $this->configProjectRow($customer . '/' . $project);
+            $sync   = service('accessConfigSync');
+            $set    = $sync->snapshot($p, true);
+            $counts = AdminChanges::configCounts($set);
+            \App\Core\Support\Transaction::run(db_connect(), fn () => service('journalWriter')->append($p['type'] === 'send' ? 'send.config.exported' : 'receive.config.exported',
+                $this->ctx(), (int) $p['customer_id'], (int) $p['id'], $counts));
 
-            return ApiResponse::ok(['data' => $set + ['hash' => \App\Core\Send\SendConfigSync::hashOf($set), 'changed_at' => $sync->changedAt((int) $p['id'])]]);
+            return ApiResponse::ok(['data' => $set + ['hash' => \App\Core\Send\SendConfigSync::hashOf($set), 'changed_at' => $sync->changedAt($p)]]);
         });
     }
 
-    public function putSendConfig(string $customer, string $project)
+    public function putAccessConfig(string $customer, string $project)
     {
         return $this->guard(function () use ($customer, $project) {
             $ref  = $customer . '/' . $project;
             $body = $this->body();
-            $p    = $this->sendProjectRow($ref);
-            if ($this->configManual()) { // private keys never lie in the queue in clear text
-                $enc = base64_encode(\App\Core\Secrets\NodeCrypto::forNode()->encrypt(json_encode($body), 'admin-send-config:' . $ref));
+            $this->configProjectRow($ref);
+            if ($this->configManual()) { // keys, hashes and the webhook URL never lie in the queue in clear text
+                $enc = base64_encode(\App\Core\Secrets\NodeCrypto::forNode()->encrypt(json_encode($body), 'admin-access-config:' . $ref));
 
-                return $this->queued('send_config', $ref, ['enc' => $enc, 'domains' => count($body['domains'] ?? []), 'profiles' => count($body['profiles'] ?? []),
-                    'accesses' => count($body['accesses'] ?? [])]);
+                return $this->queued('access_config', $ref, ['enc' => $enc] + AdminChanges::configCounts($body));
             }
             $ifHash = is_string($body['if_hash'] ?? null) ? $body['if_hash'] : null;
             unset($body['if_hash']);
-            $r = service('sendConfigSync')->apply((int) $p['id'], $body, $ifHash, $this->ctx());
 
-            return ApiResponse::ok(['data' => $r]);
+            return ApiResponse::ok(['data' => service('accessConfigSync')->apply($ref, $body, $ifHash, $this->ctx())]);
         });
     }
 
@@ -184,7 +194,7 @@ class Projects extends AdminController
             }
             $a = (new AdminChanges())->accessLock($ref . '/' . $accessId, ['locked' => $locked, 'reason' => $reason], $this->ctx());
 
-            return ApiResponse::ok(['data' => \App\Core\Send\SendAccessService::present($a) + ['send_config_hash' => service('sendConfigSync')->hash((int) $p['id'])]]);
+            return ApiResponse::ok(['data' => \App\Core\Send\SendAccessService::present($a) + ['send_config_hash' => service('accessConfigSync')->hash($p)]]);
         });
     }
 
@@ -199,12 +209,19 @@ class Projects extends AdminController
     }
 
     /** @return array<string, mixed> */
-    private function sendProjectRow(string $ref): array
+    private function configProjectRow(string $ref): array
     {
         if (str_starts_with($ref, \App\Core\Access\ApiTokenService::LOCAL_CUSTOMER . '/')) {
-            throw new ConfigException('SEND_CONFIG_LOCAL', 'The send configuration of node system projects stays local');
+            throw new ConfigException('SEND_CONFIG_LOCAL', 'The configuration of node system projects stays local');
         }
-        $p = service('projectService')->get($ref);
+
+        return service('projectService')->get($ref);
+    }
+
+    /** @return array<string, mixed> */
+    private function sendProjectRow(string $ref): array
+    {
+        $p = $this->configProjectRow($ref);
         if ($p['type'] !== 'send') {
             throw new ConfigException('PROJECT_TYPE', 'This endpoint needs a project of type send');
         }
