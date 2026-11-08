@@ -434,7 +434,7 @@ class SendAccessService
     }
 
     /** @param array<string, mixed> $a row from query() */
-    private function revokeRow(array $a): void
+    public function revokeRow(array $a): void
     {
         $now = Time::now();
         $ids = array_values(array_filter([$a['api_token_id'], $a['api_token_prev_id']]));

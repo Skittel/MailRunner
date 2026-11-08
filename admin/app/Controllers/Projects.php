@@ -6,6 +6,7 @@ use App\Libraries\PublicId;
 
 use App\Libraries\Audit;
 use App\Libraries\Clock;
+use App\Libraries\SendConfigs;
 use App\Libraries\Sync;
 use App\Libraries\Tokens;
 use Throwable;
@@ -86,6 +87,12 @@ class Projects extends BaseController
         if (! $this->sync()->ensureTokens($id)) { // tokens must be central before the move: same bearer on both nodes
             return redirect()->to(site_url('projects/' . $pid))->with('error', 'Umzug nicht gestartet: Die Tokens der bisherigen Node konnten nicht übernommen werden (Node nicht erreichbar oder zu alt).');
         }
+        if ($p['type'] === 'send' && $p['customer_key'] !== Tokens::LOCAL_CUSTOMER) { // the send configuration must be central before the move
+            $sendErr = (new SendConfigs())->reconcile($id);
+            if (db_connect()->table('send_configs')->where('project_id', $id)->countAllResults() === 0) {
+                return redirect()->to(site_url('projects/' . $pid))->with('error', 'Umzug nicht gestartet: Die Versand-Konfiguration der bisherigen Node konnte nicht übernommen werden' . ($sendErr ? ' (' . $sendErr . ')' : '') . '.');
+            }
+        }
         $db = db_connect();
         $db->table('projects')->where('id', $id)->update(['node_id' => $target, 'move_from_node_id' => $p['node_id'], 'changed_at' => Clock::now()]);
         $err = $this->sync()->pushProject($id);
@@ -97,6 +104,9 @@ class Projects extends BaseController
             return redirect()->to(site_url('projects/' . $pid))->with('error', 'Umzug nicht gestartet, neue Node meldet: ' . $err);
         }
         Audit::log('project.move_started', $ref, ['from' => (int) $p['node_id'], 'to' => $target]);
+        if ($p['type'] === 'send' && ($sendErr = (new SendConfigs())->reconcile($id)) !== null) { // domains, profiles, accesses to the new node
+            return redirect()->to(site_url('projects/' . $pid))->with('error', 'Projekt auf der neuen Node angelegt, Versand-Konfiguration noch nicht übertragen: ' . $sendErr);
+        }
 
         return redirect()->to(site_url('projects/' . $pid))->with('ok', 'Projekt auf der neuen Node angelegt. Die alte Node nimmt weiter an, bis du sie abschaltest.');
     }
@@ -166,7 +176,7 @@ class Projects extends BaseController
      * htmx partial of send projects (E-27 step 7): domains with test state, send profiles with accesses and the
      * queue, read live from the project's nodes and not stored here. Shows recipient domains only, no addresses.
      */
-    public function send(string $pid)
+    public function send(string $pid, ?string $syncError = null)
     {
         $p = $this->find(PublicId::id('projects', $pid));
         if (($p['type'] ?? 'receive') !== 'send') {
@@ -177,11 +187,21 @@ class Projects extends BaseController
             if ($nid === 0) {
                 continue;
             }
-            $nodes[] = ['label' => $label, 'node_key' => (string) db_connect()->table('nodes')->select('node_key')->where('id', $nid)->get()->getRow('node_key'),
+            $nodes[] = ['id' => $nid, 'label' => $label, 'node_key' => (string) db_connect()->table('nodes')->select('node_key')->where('id', $nid)->get()->getRow('node_key'),
                 'data' => $this->sync()->projectOnNode((int) $p['id'], $nid)];
         }
 
-        return view('projects/_send', ['project' => $p, 'nodes' => $nodes]);
+        return view('projects/_send', ['project' => $p, 'nodes' => $nodes, 'central' => (new SendConfigs())->overview((int) $p['id']), 'syncError' => $syncError]);
+    }
+
+    /** htmx: take the send configuration over / put it on every node now, then show the card again. */
+    public function sendSync(string $pid)
+    {
+        $p   = $this->find(PublicId::id('projects', $pid));
+        $err = (new SendConfigs())->reconcile((int) $p['id']);
+        Audit::log('send_config.sync_requested', $p['customer_key'] . '/' . $p['project_key'], ['error' => $err]);
+
+        return $this->send($pid, $err ?? '');
     }
 
     /** htmx partial: API tokens of the project (kept here, last use read live from the project's nodes). */

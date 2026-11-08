@@ -73,6 +73,8 @@ $routes->group('admin/v1', ['filter' => 'admincert'], static function (RouteColl
     $routes->get('projects/(:segment)/(:segment)', '\App\Controllers\Admin\V1\Projects::show/$1/$2');
     $routes->put('projects/(:segment)/(:segment)', '\App\Controllers\Admin\V1\Projects::put/$1/$2');
     $routes->post('projects/(:segment)/(:segment)/tokens', '\App\Controllers\Admin\V1\Projects::createToken/$1/$2');
+    $routes->get('projects/(:segment)/(:segment)/send-config', '\App\Controllers\Admin\V1\Projects::sendConfig/$1/$2');
+    $routes->put('projects/(:segment)/(:segment)/send-config', '\App\Controllers\Admin\V1\Projects::putSendConfig/$1/$2');
     $routes->delete('tokens/(:segment)', '\App\Controllers\Admin\V1\Projects::revokeToken/$1');
 
     if (config('Mailrunner')->receiveEnabled) {

@@ -18,6 +18,10 @@ use App\Core\Support\Time;
  *         "tokens": [{"token_id", "label", "secret_hash", "created_at", "expires_at", "revoked_at"}, ...]}
  *        "tokens" (optional) is the full central token set of the project: see ApiTokenService::sync()
  * POST   /admin/v1/projects/{customer}/{project}/tokens   {"label": "...", "expires_days": 90} -> secret once
+ * GET    /admin/v1/projects/{customer}/{project}/send-config   send configuration WITH secrets (DKIM private keys, token
+ *        and password hashes) for the central copy in MailRunner Admin; journal send.config.exported
+ * PUT    /admin/v1/projects/{customer}/{project}/send-config   {"domains", "profiles", "accesses", "if_hash"?}: makes the
+ *        node's set equal (409 SEND_CONFIG_CHANGED if it changed since if_hash); manual mode: queued (keys encrypted)
  * DELETE /admin/v1/tokens/{token_id}
  */
 class Projects extends AdminController
@@ -80,6 +84,7 @@ class Projects extends AdminController
                 'domains' => $p['type'] === 'send' ? array_map(static fn ($d) => \App\Core\Send\SendDomainService::present($d, $p), service('sendDomainService')->list((int) $p['id'])) : null,
                 'send_profiles' => $p['type'] === 'send' ? self::sendProfiles($p) : null,
                 'send_queue' => $p['type'] === 'send' ? self::sendQueue((int) $p['id']) : null,
+                'send_config' => $p['type'] === 'send' ? ['hash' => service('sendConfigSync')->hash((int) $p['id']), 'changed_at' => service('sendConfigSync')->changedAt((int) $p['id'])] : null,
                 'tokens_central' => (int) ($p['tokens_central'] ?? 0) === 1,
                 'webhook' => \App\Core\Webhooks\WebhookService::present(service('webhookService')->get((int) $p['id'])), // set by the customer (PUT /v1/webhook)
                 'tokens' => array_map(static fn ($t) => [
@@ -119,6 +124,54 @@ class Projects extends AdminController
             return ApiResponse::ok(['data' => ['token_id' => $token['token']['token_id'], 'bearer' => $token['bearer'],
                 'expires_at' => Time::toIso($token['token']['expires_at'] ?? null)]], 201);
         });
+    }
+
+    public function sendConfig(string $customer, string $project)
+    {
+        return $this->guard(function () use ($customer, $project) {
+            $p = $this->sendProjectRow($customer . '/' . $project);
+            $sync = service('sendConfigSync');
+            $set  = $sync->snapshot((int) $p['id'], true);
+            \App\Core\Support\Transaction::run(db_connect(), fn () => service('journalWriter')->append('send.config.exported', $this->ctx(), (int) $p['customer_id'], (int) $p['id'], [
+                'domains' => count($set['domains']), 'profiles' => count($set['profiles']), 'accesses' => count($set['accesses']),
+            ]));
+
+            return ApiResponse::ok(['data' => $set + ['hash' => \App\Core\Send\SendConfigSync::hashOf($set), 'changed_at' => $sync->changedAt((int) $p['id'])]]);
+        });
+    }
+
+    public function putSendConfig(string $customer, string $project)
+    {
+        return $this->guard(function () use ($customer, $project) {
+            $ref  = $customer . '/' . $project;
+            $body = $this->body();
+            $p    = $this->sendProjectRow($ref);
+            if ($this->configManual()) { // private keys never lie in the queue in clear text
+                $enc = base64_encode(\App\Core\Secrets\NodeCrypto::forNode()->encrypt(json_encode($body), 'admin-send-config:' . $ref));
+
+                return $this->queued('send_config', $ref, ['enc' => $enc, 'domains' => count($body['domains'] ?? []), 'profiles' => count($body['profiles'] ?? []),
+                    'accesses' => count($body['accesses'] ?? [])]);
+            }
+            $ifHash = is_string($body['if_hash'] ?? null) ? $body['if_hash'] : null;
+            unset($body['if_hash']);
+            $r = service('sendConfigSync')->apply((int) $p['id'], $body, $ifHash, $this->ctx());
+
+            return ApiResponse::ok(['data' => $r]);
+        });
+    }
+
+    /** @return array<string, mixed> */
+    private function sendProjectRow(string $ref): array
+    {
+        if (str_starts_with($ref, \App\Core\Access\ApiTokenService::LOCAL_CUSTOMER . '/')) {
+            throw new ConfigException('SEND_CONFIG_LOCAL', 'The send configuration of node system projects stays local');
+        }
+        $p = service('projectService')->get($ref);
+        if ($p['type'] !== 'send') {
+            throw new ConfigException('PROJECT_TYPE', 'This endpoint needs a project of type send');
+        }
+
+        return $p;
     }
 
     public function revokeToken(string $tokenId)

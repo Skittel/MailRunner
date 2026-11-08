@@ -4,6 +4,20 @@ Admin and node are versioned separately since 0.1.26: `admin/VERSION` with tags 
 `VERSION` with tags `v*` (`CHANGELOG.md` in the repository root). An admin release only offers node updates when
 the node version in the same checkout is newer. Up to 0.1.25 both shared one version: see `../CHANGELOG.md`.
 
+## 0.1.31 - 2026-11-08
+- Central send configuration (decision E-27): the customer's application changes domains, profiles and accesses on
+  a node; the admin notices it by the configuration hash on every poll, takes the full set over and puts it on the
+  other nodes of the project (move: the new node gets it before the application switches). The set incl. DKIM
+  private keys and token/password hashes is stored encrypted with the admin secrets key (operator decision
+  08.11.2026), never shown, not in the audit log.
+- Per node it remembers the hash after the last sync: a different hash is a local change (taken over), an old one a
+  stale node (pushed with `if_hash`). Two nodes changed at once: the later change wins (audit
+  `send_config.conflict`). Manual nodes get the set once and wait for approval.
+- A move of a send project starts only after the send configuration is central.
+- Card Versand: central state (taken over when and from which node, counts), per node in sync / differs / waits for
+  approval / error, button "Jetzt abgleichen". Needs node 0.2.8.
+- Migration: `send_configs`, `send_config_nodes`.
+
 ## 0.1.30 - 2026-11-08
 - Project page of send projects, card Versand (decision E-27 step 7): read live from the node, not stored here.
   Queue (open messages per status, finished in 24 h, oldest open mail), sender domains with DKIM selector and

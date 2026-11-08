@@ -54,7 +54,7 @@ abstract class AdminController extends BaseController
         } catch (ConfigException $e) {
             $status = match (true) {
                 str_ends_with($e->errorCode, '_NOT_FOUND') => 404,
-                str_ends_with($e->errorCode, '_EXISTS')    => 409,
+                str_ends_with($e->errorCode, '_EXISTS'), str_ends_with($e->errorCode, '_CONFLICT'), $e->errorCode === 'SEND_CONFIG_CHANGED' => 409,
                 default                                    => 422,
             };
 

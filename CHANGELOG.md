@@ -2,6 +2,23 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
+## 0.2.8 - 2026-11-08
+Send role: central distribution of the send configuration (decision E-27, operator decision 08.11.2026: the DKIM
+keys are kept encrypted in the admin).
+- The admin API shows `send_config` (hash and last change) of a send project. The hash covers the canonical set of
+  domains (selector, algorithm, key hash), send profiles and accesses (ids, token and password hashes, networks);
+  no row ids or node-specific timestamps, so the same set has the same hash on every node.
+- `GET /admin/v1/projects/{customer}/{project}/send-config`: the set with secrets (DKIM private keys, hashes) for
+  the central copy, only over mTLS; journal `send.config.exported` (counts only).
+- `PUT /admin/v1/projects/{customer}/{project}/send-config`: makes the node's set equal (same access, token,
+  credential and profile ids; the same bearer and SMTP password work on every node). `if_hash` refuses with
+  `409 SEND_CONFIG_CHANGED` when the set changed on the node in the meantime. Unchanged domains keep their domain
+  test; a new key on the node starts its own test. Ids of another project on the node or an SMTP username in use are
+  refused (all or nothing). Journal `send.config.synced`.
+- Manual config mode: the set waits for `mr:config:apply` (kind `send_config`, encrypted with the node key; the
+  preview shows counts only). Migration: `admin_pending_changes.kind` gains `send_config`.
+- Self test projects (`system/...`) keep their send configuration local (`SEND_CONFIG_LOCAL`).
+
 ## 0.2.7 - 2026-11-08
 Send role, step 7 of 7 (decision E-27): admin view.
 - Admin API `GET /admin/v1/projects/{customer}/{project}` of a send project adds `send_queue`: messages per open

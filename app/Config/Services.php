@@ -115,4 +115,14 @@ class Services extends BaseService
         return new \App\Core\Send\SendAccessService(db_connect(), static::journalWriter(), static::sendDomainService(),
             static::sendProfileService(), static::apiTokenService(), static::smtpCredentialService());
     }
+
+    public static function sendConfigSync(bool $getShared = true): \App\Core\Send\SendConfigSync
+    {
+        if ($getShared) {
+            return static::getSharedInstance('sendConfigSync');
+        }
+
+        return new \App\Core\Send\SendConfigSync(db_connect(), static::journalWriter(), static::sendDomainService(),
+            static::sendProfileService(), static::sendAccessService());
+    }
 }

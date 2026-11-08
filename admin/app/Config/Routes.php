@@ -48,6 +48,7 @@ $routes->group('', ['filter' => 'adminauth'], static function (RouteCollection $
     $routes->post('projects/(:pid)/move/finish', 'Projects::moveFinish/$1');
     $routes->post('projects/(:pid)/move/cancel', 'Projects::moveCancel/$1');
     $routes->get('projects/(:pid)/send', 'Projects::send/$1');
+    $routes->post('projects/(:pid)/send/sync', 'Projects::sendSync/$1');
     $routes->get('projects/(:pid)/tokens', 'Projects::tokens/$1');
     $routes->post('projects/(:pid)/tokens', 'Projects::createToken/$1');
     $routes->post('projects/(:pid)/tokens/(:segment)/revoke', 'Projects::revokeToken/$1/$2');

@@ -111,8 +111,37 @@ class AdminChanges
         return json_decode($json, true) ?: [];
     }
 
+    /**
+     * Send configuration from the admin (queued in manual mode, approved on the node). Applied without if_hash: the
+     * operator approved exactly this set.
+     *
+     * @param array<string, mixed> $set
+     */
+    public function sendConfig(string $ref, array $set, ChangeContext $ctx): array
+    {
+        unset($set['if_hash']);
+        $p = service('projectService')->get($ref);
+
+        return service('sendConfigSync')->apply((int) $p['id'], $set, null, $ctx);
+    }
+
+    /** @return array<string, mixed> */
+    public static function decryptSendConfig(string $ref, array $payload): array
+    {
+        $json = \App\Core\Secrets\NodeCrypto::forNode()->decrypt((string) base64_decode((string) ($payload['enc'] ?? ''), true), 'admin-send-config:' . $ref);
+
+        return json_decode($json, true) ?: [];
+    }
+
     public function preview(string $kind, string $ref, array $body): array
     {
+        if ($kind === 'send_config') { // counts only, never keys or hashes
+            $p   = service('projectService')->find($ref);
+            $now = $p === null ? ['domains' => [], 'profiles' => [], 'accesses' => []] : service('sendConfigSync')->snapshot((int) $p['id']);
+
+            return ['domains' => [count($now['domains']), (int) ($body['domains'] ?? 0)], 'profiles' => [count($now['profiles']), (int) ($body['profiles'] ?? 0)],
+                'accesses' => [count($now['accesses']), (int) ($body['accesses'] ?? 0)]];
+        }
         if ($kind === 'secrets') { // names and set/changed/removed only, never values
             $now  = \App\Core\Node\CommonSecrets::parse(config('Mailrunner')->commonSecretsFile());
             $want = self::decryptSecrets($body);

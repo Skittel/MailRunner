@@ -31,6 +31,7 @@ class Sync
             $status = $this->offerUpdate($node, $status);
             $status = $this->offerSecrets($node, $status);
             $this->offerTokens($node);
+            (new SendConfigs())->reconcileNode($node); // send projects: take local changes over, put the set on every node
             db_connect()->table('nodes')->where('id', $node['id'])->update([
                 'last_checked_at' => $now, 'last_ok_at' => $now, 'last_error' => null,
                 'last_status' => json_encode($status, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
