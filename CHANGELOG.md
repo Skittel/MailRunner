@@ -2,6 +2,14 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
+## 0.2.7 - 2026-11-08
+Send role, step 7 of 7 (decision E-27): admin view.
+- Admin API `GET /admin/v1/projects/{customer}/{project}` of a send project adds `send_queue`: messages per open
+  status, finished in the last 24 h, the oldest open message and the latest 30 messages (open ones first) with
+  status, attempts, last SMTP answer and next attempt. Only the recipient domain, never the address, subject or
+  content. Domains with test state and profiles with accesses were already part of it.
+- `GET /admin/v1/node` uses the same queue figures.
+
 ## 0.2.6 - 2026-11-08
 Send role, step 6 of 7 (decision E-27): bounces.
 - Profiles with `return_path_domain` send with the Return-Path `<message_id>-<node>-<check>@<return_path_domain>`

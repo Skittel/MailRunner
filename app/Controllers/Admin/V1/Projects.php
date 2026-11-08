@@ -9,7 +9,8 @@ use App\Core\Support\Time;
 
 /**
  * GET    /admin/v1/projects
- * GET    /admin/v1/projects/{customer}/{project}          incl. routes, tokens (hash, never the secret) and webhook state
+ * GET    /admin/v1/projects/{customer}/{project}          incl. routes, tokens (hash, never the secret) and webhook state;
+ *        send projects: domains with test state, send profiles with accesses, send_queue (figures, latest messages)
  * PUT    /admin/v1/projects/{customer}/{project}          complete configuration, idempotent:
  *        {"type": "receive"|"send" (fixed at creation, default receive), "profile": "analysis", "name": "...", "enabled": true, "routes": ["example.org", ...],
  *        send projects: profile smarthost, no routes, settings send_limit_hour/day, send_allowed_domains (null = all), send_test_criteria
@@ -53,6 +54,18 @@ class Projects extends AdminController
         return $out;
     }
 
+    /**
+     * Queue of a send project: figures and the latest messages (recipient domain only).
+     *
+     * @return array<string, mixed>
+     */
+    private static function sendQueue(int $projectId): array
+    {
+        $stats = new \App\Core\Send\SendQueueStats(db_connect());
+
+        return $stats->figures($projectId) + ['recent' => $stats->recent($projectId)];
+    }
+
     public function show(string $customer, string $project)
     {
         return $this->guard(function () use ($customer, $project) {
@@ -66,6 +79,7 @@ class Projects extends AdminController
                 'messages_unacked' => $unacked,
                 'domains' => $p['type'] === 'send' ? array_map(static fn ($d) => \App\Core\Send\SendDomainService::present($d, $p), service('sendDomainService')->list((int) $p['id'])) : null,
                 'send_profiles' => $p['type'] === 'send' ? self::sendProfiles($p) : null,
+                'send_queue' => $p['type'] === 'send' ? self::sendQueue((int) $p['id']) : null,
                 'tokens_central' => (int) ($p['tokens_central'] ?? 0) === 1,
                 'webhook' => \App\Core\Webhooks\WebhookService::present(service('webhookService')->get((int) $p['id'])), // set by the customer (PUT /v1/webhook)
                 'tokens' => array_map(static fn ($t) => [

@@ -162,6 +162,28 @@ class Projects extends BaseController
         return redirect()->to(site_url('projects/' . self::pid('projects', $id)))->with($err === null ? 'ok' : 'error', $err === null ? 'Übertragen.' : 'Übertragung fehlgeschlagen: ' . $err);
     }
 
+    /**
+     * htmx partial of send projects (E-27 step 7): domains with test state, send profiles with accesses and the
+     * queue, read live from the project's nodes and not stored here. Shows recipient domains only, no addresses.
+     */
+    public function send(string $pid)
+    {
+        $p = $this->find(PublicId::id('projects', $pid));
+        if (($p['type'] ?? 'receive') !== 'send') {
+            return '';
+        }
+        $nodes = [];
+        foreach (array_filter([(int) $p['node_id'] => 'Node', (int) ($p['move_from_node_id'] ?? 0) => 'alte Node']) as $nid => $label) {
+            if ($nid === 0) {
+                continue;
+            }
+            $nodes[] = ['label' => $label, 'node_key' => (string) db_connect()->table('nodes')->select('node_key')->where('id', $nid)->get()->getRow('node_key'),
+                'data' => $this->sync()->projectOnNode((int) $p['id'], $nid)];
+        }
+
+        return view('projects/_send', ['project' => $p, 'nodes' => $nodes]);
+    }
+
     /** htmx partial: API tokens of the project (kept here, last use read live from the project's nodes). */
     public function tokens(string $pid)
     {

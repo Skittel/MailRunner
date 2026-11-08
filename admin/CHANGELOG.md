@@ -4,6 +4,14 @@ Admin and node are versioned separately since 0.1.26: `admin/VERSION` with tags 
 `VERSION` with tags `v*` (`CHANGELOG.md` in the repository root). An admin release only offers node updates when
 the node version in the same checkout is newer. Up to 0.1.25 both shared one version: see `../CHANGELOG.md`.
 
+## 0.1.30 - 2026-11-08
+- Project page of send projects, card Versand (decision E-27 step 7): read live from the node, not stored here.
+  Queue (open messages per status, finished in 24 h, oldest open mail), sender domains with DKIM selector and
+  domain test (status, missing checks, last pass, next test, return-path domain), send profiles with limits (marked
+  when the project limits them), retries, test interval, senders not allowed and their accesses (API token id, SMTP
+  user, IP networks, last use), and the latest mails with recipient domain, status and last SMTP answer. During a
+  move both nodes. Needs node 0.2.7 for the queue; older send nodes show domains and profiles.
+
 ## 0.1.29 - 2026-11-06
 - Projects have a type, chosen when creating and fixed afterwards: Empfang (receive) or Versand (send, decision
   E-27). Send projects have no routes and no receive settings; instead mails per hour and per day for the whole

@@ -286,6 +286,32 @@ final class SendDeliveryTest extends CIUnitTestCase
         exec('rm -rf ' . escapeshellarg($dir));
     }
 
+    public function testAdminApiShowsDomainsProfilesAccessesAndQueueWithoutAddresses(): void
+    {
+        $this->assertSame(202, $this->api('POST', 'send', ['from' => 'info@shop.example', 'to' => ['a@example.net', 'b@example.org'], 'subject' => 'Geheim', 'text' => 'x'])[0]);
+        db_connect()->table('send_messages')->where('recipient', 'b@example.org')->update(['status' => 'sent', 'last_code' => 250, 'last_response' => 'ok']);
+        $admin = function (string $uri): string {
+            service('superglobals')->setServer('MR_CLIENT_VERIFY', 'SUCCESS')->setServer('MR_CLIENT_S_DN', 'CN=mailrunner-admin,O=MailRunner Admin');
+
+            return (string) $this->withHeaders(['X-MailRunner-Actor' => 'admin@example.org'])->call('get', $uri)->response()->getBody();
+        };
+        $body = $admin('admin/v1/projects/acme/mailer');
+        $node = json_decode($admin('admin/v1/node'), true)['send']['queue'];
+        $d = json_decode($body, true)['data'];
+        $this->assertSame('shop.example', $d['domains'][0]['domain']);
+        $this->assertSame('untested', $d['domains'][0]['test']['status']);
+        $this->assertSame(['shop', ['api']], [$d['send_profiles'][0]['name'], array_column($d['send_profiles'][0]['access_list'], 'type')]);
+        $q = $d['send_queue'];
+        $this->assertSame([1, 1], [$q['queued'], $q['last_24h']['sent']]);
+        $this->assertSame(['queued', 'sent'], array_column($q['recent'], 'status'), 'open messages first');
+        $this->assertSame(['example.net', 'example.org'], array_column($q['recent'], 'recipient_domain'));
+        $this->assertSame(250, $q['recent'][1]['last']['code']);
+        foreach (['a@example.net', 'b@example.org', 'Geheim', 'bearer'] as $private) {
+            $this->assertStringNotContainsString($private, $body, 'no addresses, subjects or bearer secrets in the admin view');
+        }
+        $this->assertSame(1, $node['queued']);
+    }
+
     public function testRetentionDeletesTheMailWhenEveryRecipientIsFinal(): void
     {
         $this->passTest();

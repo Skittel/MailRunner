@@ -140,6 +140,53 @@ final class PagesTest extends CIUnitTestCase
         $this->assertNull(json_decode($row['settings'], true)['send_allowed_domains']);
     }
 
+    public function testSendCardLoadsLiveFromTheNode(): void
+    {
+        $this->db->table('projects')->insert(['public_id' => 'pr0j-0002', 'customer_id' => 1, 'node_id' => 1, 'project_key' => 'mailer', 'name' => 'Mailer', 'type' => 'send',
+            'profile' => 'smarthost', 'enabled' => 1, 'routes' => '[]', 'settings' => '{"send_limit_hour":100,"send_limit_day":1000}', 'changed_at' => '2026-11-08 10:00:00', 'created_at' => '2026-11-08 10:00:00']);
+        $page = $this->withSession(['access' => 'ro'] + $this->admin)->get('projects/pr0j-0002');
+        $this->assertStringContainsString('hx-get="/projects/pr0j-0002/send"', (string) $page->getBody());
+        $this->withSession($this->admin)->get('projects/pr0j-0002/send')->assertSee('nicht erreichbar'); // no mTLS in tests
+        $this->assertSame('', trim((string) $this->withSession($this->admin)->get('projects/pr0j-0001/send')->getBody()), 'receive project: no send card');
+        $this->assertStringNotContainsString('/send"', (string) $this->withSession($this->admin)->get('projects/pr0j-0001')->getBody());
+    }
+
+    public function testSendCardShowsDomainsProfilesAccessesAndQueue(): void
+    {
+        helper('admin');
+        $data = [
+            'domains' => [['domain' => 'shop.example', 'dkim' => ['selector' => 's1', 'algorithm' => 'rsa', 'bits' => 2048], 'allowed' => true,
+                'test' => ['status' => 'failed', 'valid' => false, 'passed_at' => null, 'next_at' => '2026-11-08T12:00:00.000000Z', 'requested' => false, 'running' => false,
+                    'error' => null, 'return_path_domain' => 'bounce.example', 'details' => ['stage' => 'smartmailflow', 'failed' => ['dkim.v6']]]],
+                ['domain' => 'old.example', 'dkim' => ['selector' => 's2', 'algorithm' => 'ed25519', 'bits' => 0], 'allowed' => false,
+                    'test' => ['status' => 'passed', 'passed_at' => '2026-11-08T09:00:00.000000Z', 'next_at' => null, 'requested' => true, 'running' => false, 'error' => 'no SmartMailFlow result', 'return_path_domain' => null, 'details' => null]]],
+            'send_profiles' => [['name' => 'shop', 'label' => 'Webshop', 'enabled' => true, 'senders' => ['shop.example', 'info@old.example'], 'senders_not_allowed' => ['info@old.example'],
+                'recipients' => null, 'limit_hour' => 500, 'limit_day' => 5000, 'effective_limit_hour' => 100, 'effective_limit_day' => 1000,
+                'retry' => ['attempts' => 16, 'max_minutes' => 480], 'return_path_domain' => 'bounce.example', 'test_interval_hours' => 24,
+                'access_list' => [['type' => 'api', 'token_id' => 'mrt_aaaaaaaaaaaaaaaa', 'label' => 'App', 'enabled' => true, 'last_used_at' => null],
+                    ['type' => 'smtp', 'username' => 'shop-relay', 'plaintext_port25' => false, 'allowed_networks' => null, 'label' => '', 'enabled' => false, 'last_used_at' => null],
+                    ['type' => 'ip', 'networks' => ['192.0.2.8/29'], 'label' => 'Server', 'enabled' => true]]]],
+            'send_queue' => ['queued' => 1, 'waiting_test' => 2, 'sending' => 0, 'deferred' => 3, 'last_24h' => ['sent' => 7, 'bounced' => 1, 'failed' => 0],
+                'oldest_open' => '2026-11-08T10:00:00.000000Z', 'recent' => [
+                    ['message_id' => 'mrm_bbbbbbbbbbbbbbbb', 'submission_id' => 'mrs_cccccccccccccccc', 'profile' => 'shop', 'recipient_domain' => 'example.net', 'status' => 'deferred',
+                        'reason' => null, 'attempts' => 2, 'last' => ['code' => 451, 'enhanced' => '4.7.1', 'response' => 'Greylisted <try later>'], 'next_attempt_at' => '2026-11-08T10:05:00.000000Z',
+                        'created_at' => '2026-11-08T10:00:00.000000Z']]],
+        ];
+        $html = view('projects/_send', ['project' => ['public_id' => 'pr0j-0002'], 'nodes' => [['label' => 'Node', 'node_key' => 'node1.eu', 'data' => $data]]]);
+        foreach (['shop.example', 'durchgefallen', 'Fehlt: dkim.v6', 'bounce.example', 'nicht erlaubt', 'angefordert', 'no SmartMailFlow result', 'rsa 2048',
+            'Limit 100/h · 1000/Tag', '(Projekt)', '16 Versuche in 8 h', 'mrt_aaaaaaaaaaaaaaaa', 'shop-relay', 'gesperrt', '192.0.2.8/29',
+            'zurückgestellt', 'mrm_bbbbbbbbbbbbbbbb', 'example.net', '451 4.7.1 Greylisted &lt;try later&gt;', 'wartet auf Test'] as $text) {
+            $this->assertStringContainsString($text, $html, $text);
+        }
+        $this->assertStringNotContainsString('<try later>', $html, 'node text is escaped');
+
+        // an older node without the queue view and an empty project
+        $html = view('projects/_send', ['project' => ['public_id' => 'pr0j-0002'], 'nodes' => [['label' => 'Node', 'node_key' => 'node1.eu', 'data' => ['domains' => [], 'send_profiles' => []]]]]);
+        $this->assertStringContainsString('ab Node 0.2.7', $html);
+        $this->assertStringContainsString('Noch keine Domain', $html);
+        $this->assertStringContainsString('Noch kein Sendeprofil', $html);
+    }
+
     public function testReadOnlyUserSeesButCannotChange(): void
     {
         $ro = ['access' => 'ro'] + $this->admin;

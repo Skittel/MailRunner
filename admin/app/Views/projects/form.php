@@ -129,5 +129,14 @@ $this->setVar('pretitle', '<a href="/customers/' . $customer['public_id'] . '">'
     <div id="tokens" hx-get="/projects/<?= $project['public_id'] ?>/tokens" hx-trigger="load"><div class="card-body text-secondary">Lädt …</div></div></div>
 </div>
 <?php endif ?>
+<?php if (! $isNew && $type === 'send'): ?>
+<div class="col-12">
+<div class="card"><div class="card-header"><h3 class="card-title">Versand</h3>
+    <div class="card-actions"><button class="btn btn-sm btn-outline-secondary" hx-get="/projects/<?= $project['public_id'] ?>/send" hx-target="#send" hx-indicator="#send-spin">Aktualisieren <span id="send-spin" class="htmx-indicator spinner-border spinner-border-sm ms-1"></span></button></div></div>
+    <div id="send" hx-get="/projects/<?= $project['public_id'] ?>/send" hx-trigger="load"><div class="card-body text-secondary">Lädt von der Node …</div></div>
+    <div class="card-footer small text-secondary">Live von der Node gelesen, nicht im Admin gespeichert. Domains, Profile und Zugänge legt die Anwendung des Kunden per API an.</div>
+</div>
+</div>
+<?php endif ?>
 </div>
 <?= $this->endSection() ?>
