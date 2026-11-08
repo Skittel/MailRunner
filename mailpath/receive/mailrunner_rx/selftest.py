@@ -42,7 +42,9 @@ ZONE = "selftest.test"
 RCPT_DOMAIN = f"rx.{ZONE}"
 HELO = f"client.{ZONE}"
 SELFTEST_ENV = os.path.join(config.CONFIG_DIR, "selftest.env")
-SERVICES = ["postfix", "mailrunner-milter", "mailrunner-auth", "mailrunner-smtplog", "unbound", "nginx", "mariadb"]
+SERVICES = ["postfix", "mailrunner-milter", "mailrunner-auth", "mailrunner-smtplog", "unbound", "nginx", "mariadb",
+            # path units: a start-limit hit leaves them failed and silently stops applies, imports, pings, updates
+            "mailrunner-apply.path", "mailrunner-import.path", "mailrunner-webhook.path", "mailrunner-update.path"]
 DEBUG_SECTIONS = ["smtp", "header", "spf", "dkim", "dmarc", "arc", "return_path_dns", "fcrdns", "helo",
                   "ip_protocol", "dnsbl", "domain_security", "dns_analysis", "smime"]
 WARN_250_S, FAIL_250_S = 15, 60

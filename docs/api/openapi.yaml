@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MailRunner customer API (receive, send)
-  version: 0.2.2
+  version: 0.2.3
   description: |
     Pull API of a MailRunner node. A client application collects the messages the node accepted
     for its project. A token belongs to exactly one project and only sees that project's data.

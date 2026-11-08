@@ -313,8 +313,9 @@ systemctl daemon-reload
 systemctl enable --now mailrunner-import.path mailrunner-webhook.path mailrunner-apply.path mailrunner-maintenance.timer mailrunner-update.path >/dev/null 2>&1
 # journal of delivery attempts (reads the mail log; restart picks up a new release)
 systemctl enable mailrunner-smtplog >/dev/null 2>&1
-systemctl reset-failed mailrunner-import.service mailrunner-import.path mailrunner-webhook.service mailrunner-webhook.path >/dev/null 2>&1 || true
-systemctl restart mailrunner-smtplog mailrunner-import.path
+systemctl reset-failed mailrunner-import.service mailrunner-import.path mailrunner-webhook.service mailrunner-webhook.path \
+    mailrunner-apply.service mailrunner-apply.path >/dev/null 2>&1 || true
+systemctl restart mailrunner-smtplog mailrunner-import.path mailrunner-webhook.path mailrunner-apply.path
 
 log "API (php-fpm + nginx)"
 # Admin API trust: CA of MailRunner Admin (public certificate only). Without it /admin/ answers 403.

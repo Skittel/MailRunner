@@ -2,6 +2,14 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
+## 0.2.3 - 2026-11-08
+- Fix: many configuration changes in a row (found in the live test: send accesses created and deleted quickly)
+  requested `mr:apply` more than 5 times in 10 s; systemd's start limit then left `mailrunner-apply.path` failed and
+  no later change reached the mail path (receive routes and logins included) until a manual restart. The unit now
+  allows bursts (1000 per minute) and pauses 1 s after each run so a burst collapses into one more run; the installer
+  resets and restarts the apply path unit.
+- Self test `base.services` also checks the path units (apply, import, webhook, update).
+
 ## 0.2.2 - 2026-11-08
 Send role, step 3 of 7 (decision E-27): submission. Mail is accepted and queued encrypted; nothing is delivered yet
 (delivery worker: step 4, domain test: step 5).

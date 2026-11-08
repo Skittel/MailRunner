@@ -1,8 +1,14 @@
 [Unit]
 Description=MailRunner: generate and activate mail path configuration (spark mr:apply)
 After=mariadb.service
+# Many changes in a row (e.g. accesses created and deleted by an application) request an apply each time: never hit
+# the start limit (that would leave mailrunner-apply.path failed and stop all later applies); the pause after each
+# run lets a burst collapse into one more run.
+StartLimitIntervalSec=60
+StartLimitBurst=1000
 
 [Service]
 Type=oneshot
 ExecStartPre=/usr/bin/rm -f /var/lib/mailrunner/apply.request
 ExecStart=/usr/bin/php /opt/mailrunner/current/spark mr:apply
+ExecStartPost=/bin/sleep 1
