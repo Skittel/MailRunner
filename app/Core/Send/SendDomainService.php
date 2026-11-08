@@ -82,6 +82,7 @@ class SendDomainService
                 'dkim_selector' => $selector, 'dkim_algorithm' => $key['algorithm'], 'dkim_bits' => $key['bits'],
                 'dkim_private_enc' => ($this->crypto)()->encrypt($key['private_key'], self::context($projectId, $domain)),
                 'dkim_public' => $key['public'], 'key_sha256' => $sha, 'updated_at' => $now, 'updated_by' => $ctx->actor,
+                'test_requested_at' => $now, // a new key needs a new domain test (mr-sender starts it)
             ];
             if ($old === null) {
                 $this->db->table('send_domains')->insert($data + ['project_id' => $projectId, 'domain' => $domain, 'created_at' => $now]);
@@ -116,6 +117,38 @@ class SendDomainService
         });
     }
 
+    /**
+     * Asks mr-sender for a domain test now (E-27 step 5). Returns the domain row.
+     *
+     * @return array<string, mixed>
+     */
+    public function requestTest(int $projectId, string $domain, ChangeContext $ctx): array
+    {
+        return Transaction::run($this->db, function () use ($projectId, $domain, $ctx): array {
+            $project = $this->sendProject($projectId);
+            $row     = $this->get($projectId, $domain) ?? throw new ConfigException('DOMAIN_NOT_FOUND', 'Domain not set');
+            if ($row['test_requested_at'] === null) {
+                $this->db->table('send_domains')->where('id', $row['id'])->update(['test_requested_at' => Time::now()]);
+                $this->journal->append('send.domain.test_requested', $ctx, (int) $project['customer_id'], $projectId, ['domain' => $row['domain']]);
+            }
+
+            return $this->get($projectId, $domain);
+        });
+    }
+
+    /**
+     * The last test runs of a domain, newest first.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function tests(array $row, int $limit = 20): array
+    {
+        return array_map(static fn ($t) => [
+            'started_at' => Time::toIso($t['started_at']), 'finished_at' => Time::toIso($t['finished_at']), 'trigger' => $t['trigger_reason'],
+            'outcome' => $t['outcome'], 'key_sha256' => $t['key_sha256'], 'details' => $t['details'] === null ? null : json_decode($t['details'], true),
+        ], $this->db->table('send_domain_tests')->where('domain_row_id', $row['id'])->orderBy('id', 'DESC')->limit($limit)->get()->getResultArray());
+    }
+
     /** Decrypted private key, for the delivery worker and the domain test (never for the API). */
     public function privateKey(array $row): string
     {
@@ -134,10 +167,30 @@ class SendDomainService
             'dkim' => ['selector' => $row['dkim_selector'], 'algorithm' => $row['dkim_algorithm'], 'bits' => (int) $row['dkim_bits'], 'key_sha256' => $row['key_sha256']],
             'dns' => DkimKeys::dnsRecord($row['domain'], $row['dkim_selector'], $row['dkim_algorithm'], $row['dkim_public']),
             'allowed' => $project === null ? null : ProjectService::sendDomainAllowed($project, $row['domain']),
-            // domain test (step 5): only a passed test for exactly the current key lets the domain send
-            'test' => ['status' => ($row['test_status'] ?? 'untested') === 'passed' && ($row['test_key_sha256'] ?? null) !== $row['key_sha256'] ? 'untested' : ($row['test_status'] ?? 'untested'),
-                'passed_at' => Time::toIso($row['test_passed_at'] ?? null), 'checked_at' => Time::toIso($row['test_checked_at'] ?? null)],
+            'test' => self::presentTest($row),
             'created_at' => Time::toIso($row['created_at']), 'updated_at' => Time::toIso($row['updated_at']),
+        ];
+    }
+
+    /**
+     * Domain test state (E-27 step 5). "valid": the domain may send (passed with exactly the current key). A test
+     * made with an older key counts as untested. "error": the last run could not finish (e.g. SmartMailFlow
+     * unavailable); the last valid result stays.
+     *
+     * @return array<string, mixed>
+     */
+    public static function presentTest(array $row): array
+    {
+        $current = ($row['test_key_sha256'] ?? null) === $row['key_sha256'];
+        $status  = $row['test_status'] ?? 'untested';
+
+        return [
+            'status' => $current ? $status : 'untested', 'valid' => $current && $status === 'passed',
+            'passed_at' => Time::toIso($row['test_passed_at'] ?? null), 'checked_at' => Time::toIso($row['test_checked_at'] ?? null),
+            'next_at' => Time::toIso($row['test_next_at'] ?? null), 'requested' => ($row['test_requested_at'] ?? null) !== null,
+            'running' => ($row['test_running_until'] ?? null) !== null && $row['test_running_until'] > Time::now(),
+            'error' => $row['test_error'] ?? null,
+            'details' => $current && ($row['test_details'] ?? null) !== null ? json_decode($row['test_details'], true) : null,
         ];
     }
 

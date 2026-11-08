@@ -198,6 +198,56 @@ final class SendDeliveryTest extends CIUnitTestCase
         $this->assertSame(['deferred', 'worker_lease_expired'], [$this->messages()['later@example.org']['status'], $this->messages()['later@example.org']['status_reason']]);
     }
 
+    public function testDomainTestStateIsKeptAndReleasesWaitingMail(): void
+    {
+        // a new key requests a test; the worker leases it
+        [$t] = $this->worker([['due_tests' => 5]]);
+        $this->assertSame([['domain' => 'shop.example', 'trigger' => 'requested']], $t['tests']);
+        [, $d] = $this->api('GET', 'domains/shop.example', null, $this->manage);
+        $this->assertTrue($d['data']['test']['running']);
+        $this->assertSame([[]], array_column($this->worker([['due_tests' => 5]]), 'tests'), 'leased: not twice');
+
+        // a mail waits for the test; the test passes -> the mail is due at once, journal, history, interval from the profile
+        db_connect()->table('send_domains')->update(['test_running_until' => null]);
+        $this->api('POST', 'send', ['from' => 'info@shop.example', 'to' => ['a@example.net'], 'subject' => 'x', 'text' => 'x']);
+        $this->worker([['claim' => 10]]);
+        $this->assertSame('waiting_test', $this->messages()['a@example.net']['status']);
+        db_connect()->table('send_messages')->update(['next_attempt_at' => '2030-01-01 00:00:00']);
+        [$t, $r] = $this->worker([['due_tests' => 5], ['record_test' => ['outcome' => 'passed', 'details' => ['failed' => []]]]]);
+        $this->assertSame(['passed'], $r['recorded']);
+        $this->assertLessThan(time() + 5, strtotime($this->messages()['a@example.net']['next_attempt_at'] . ' UTC'), 'released');
+        [, $d] = $this->api('GET', 'domains/shop.example', null, $this->manage);
+        $this->assertSame(['passed', true, false, false, null], [$d['data']['test']['status'], $d['data']['test']['valid'], $d['data']['test']['requested'],
+            $d['data']['test']['running'], $d['data']['test']['error']]);
+        $this->assertEqualsWithDelta(24 * 3600, strtotime($d['data']['test']['next_at']) - time(), 10, 'interval of the profile (24 h)');
+        [$c] = $this->worker([['claim' => 10]]);
+        $this->assertSame(['a@example.net'], $c['claimed'], 'the mail goes now');
+        $j = db_connect()->table('journal')->where('event', 'send.domain.tested')->get()->getRowArray();
+        $this->assertSame(['shop.example', 'passed', 'requested'], [json_decode($j['details'], true)['domain'], json_decode($j['details'], true)['outcome'], json_decode($j['details'], true)['trigger']]);
+        [, $hist] = $this->api('GET', 'domains/shop.example/tests', null, $this->manage);
+        $this->assertSame(['passed'], array_column($hist['data'], 'outcome'));
+
+        // SmartMailFlow unavailable: not a failure, the passed result stays, retry in 10 minutes
+        $this->assertSame(202, $this->api('POST', 'domains/shop.example/test', [], $this->manage)[0]);
+        [, $r] = $this->worker([['due_tests' => 5], ['record_test' => ['outcome' => 'unavailable', 'details' => ['error' => 'no SmartMailFlow result for IPv6']]]]);
+        [, $d] = $this->api('GET', 'domains/shop.example', null, $this->manage);
+        $this->assertSame(['passed', true, 'no SmartMailFlow result for IPv6'], [$d['data']['test']['status'], $d['data']['test']['valid'], $d['data']['test']['error']]);
+        $this->assertEqualsWithDelta(600, strtotime($d['data']['test']['next_at']) - time(), 10);
+
+        // the key changes while a test runs: the result does not count, a new test is requested
+        db_connect()->table('send_domains')->update(['test_next_at' => Time::now()]);
+        [$t, $r] = $this->worker([['due_tests' => 5], ['record_test' => ['outcome' => 'passed', 'key' => str_repeat('e', 64)]]]);
+        $this->assertSame(['key_changed'], $r['recorded']);
+
+        // a failed interval test stops sending at once
+        db_connect()->table('send_domains')->update(['test_next_at' => Time::now(), 'test_running_until' => null]);
+        [, $r] = $this->worker([['due_tests' => 5], ['record_test' => ['outcome' => 'failed', 'details' => ['failed' => ['dkim.v4']]]]]);
+        $this->assertSame(['failed'], $r['recorded']);
+        [, $d] = $this->api('GET', 'domains/shop.example', null, $this->manage);
+        $this->assertSame(['failed', false, ['failed' => ['dkim.v4']]], [$d['data']['test']['status'], $d['data']['test']['valid'], $d['data']['test']['details']]);
+        $this->assertSame(3, db_connect()->table('send_domain_tests')->countAllResults() - 1, 'every run is kept (passed, unavailable, key_changed, failed)');
+    }
+
     public function testRetentionDeletesTheMailWhenEveryRecipientIsFinal(): void
     {
         $this->passTest();

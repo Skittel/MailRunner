@@ -45,6 +45,9 @@ final class SendRetention
             $stats['purged'] += $this->db->affectedRows();
         }
 
+        // domain test runs: 30 days (the state of the last test stays in send_domains)
+        $this->db->query('DELETE FROM send_domain_tests WHERE finished_at < ?', [Time::nowObject()->sub(new \DateInterval('P30D'))->format(Time::DB_FORMAT)]);
+
         return $stats;
     }
 }

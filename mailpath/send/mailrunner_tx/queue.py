@@ -13,6 +13,7 @@ Every status change takes a change_seq from send_sequence inside the same transa
 marks the project's webhook pending (event "delivery").
 """
 import datetime as dt
+import json
 import os
 
 import pymysql
@@ -188,3 +189,101 @@ class Queue:
         cur.execute(f"SELECT COUNT(*) AS n FROM project_webhooks WHERE pending_at IS NOT NULL AND project_id IN ({marks})", ids)
         self.pending_pings = int(cur.fetchone()["n"])
         return self.pending_pings
+
+    # ------------------------------------------------------------------ domain test (step 5)
+    TEST_LEASE = 900
+    UNAVAILABLE_RETRY = 600
+    FAILED_RETRY = 3600
+
+    def due_tests(self, limit, now=None):
+        """Domains that need a test now, leased to this worker: requested (new key, POST .../test), a mail waits for
+        a test, or the interval is over. Returns rows with key, criteria and the trigger."""
+        def run(cur):
+            t = now or utcnow()
+            cur.execute(
+                """SELECT d.id FROM send_domains d JOIN projects p ON p.id = d.project_id JOIN customers c ON c.id = p.customer_id
+                   WHERE p.type = 'send' AND p.enabled = 1 AND c.enabled = 1
+                     AND (d.test_running_until IS NULL OR d.test_running_until < %s)
+                     AND (d.test_requested_at IS NOT NULL
+                          OR (d.test_next_at IS NOT NULL AND d.test_next_at <= %s)
+                          OR ((d.test_next_at IS NULL OR d.test_next_at <= %s) AND EXISTS (
+                                SELECT 1 FROM send_messages m JOIN send_submissions s ON s.id = m.submission_row_id
+                                WHERE s.project_id = d.project_id AND s.from_domain = d.domain AND m.status = 'waiting_test')))
+                   ORDER BY d.test_requested_at IS NULL, d.id LIMIT %s""", (t, t, t, limit))
+            ids = [r["id"] for r in cur.fetchall()]
+            if not ids:
+                return []
+            marks = ",".join(["%s"] * len(ids))
+            cur.execute(f"""SELECT d.*, p.send_test_criteria, p.customer_id,
+                                EXISTS (SELECT 1 FROM send_messages m JOIN send_submissions s ON s.id = m.submission_row_id
+                                        WHERE s.project_id = d.project_id AND s.from_domain = d.domain AND m.status = 'waiting_test') AS waiting
+                            FROM send_domains d JOIN projects p ON p.id = d.project_id
+                            WHERE d.id IN ({marks}) AND (d.test_running_until IS NULL OR d.test_running_until < %s) FOR UPDATE SKIP LOCKED""", (*ids, t))
+            rows = cur.fetchall()
+            for r in rows:
+                r["trigger"] = "requested" if r["test_requested_at"] is not None else "waiting" if r["waiting"] else "interval"
+                cur.execute("UPDATE send_domains SET test_running_until = %s WHERE id = %s", (t + dt.timedelta(seconds=self.TEST_LEASE), r["id"]))
+            return rows
+        return self._tx(run)
+
+    def interval_hours(self, cur, project_id, domain):
+        """Shortest test interval of the enabled profiles that send from the domain; None if no profile uses it."""
+        cur.execute("SELECT senders, test_interval_hours FROM send_profiles WHERE project_id = %s AND enabled = 1", (project_id,))
+        hours = []
+        for p in cur.fetchall():
+            senders = json.loads(p["senders"]) if isinstance(p["senders"], str) else (p["senders"] or [])
+            if any(e == domain or e.rsplit("@", 1)[-1] == domain for e in senders):
+                hours.append(int(p["test_interval_hours"]))
+        return min(hours) if hours else None
+
+    def record_test(self, row, key_sha256, started, outcome, details, now=None):
+        """Stores a test run. Ignores the state change if the key changed meanwhile (a new test is requested)."""
+        def run(cur):
+            t = now or utcnow()
+            cur.execute("SELECT key_sha256, test_requested_at FROM send_domains WHERE id = %s FOR UPDATE", (row["id"],))
+            cur_row = cur.fetchone()
+            if cur_row is None:   # domain deleted meanwhile
+                return None
+            cur.execute("INSERT INTO send_domain_tests (domain_row_id, project_id, trigger_reason, key_sha256, started_at, finished_at, outcome, details) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                        (row["id"], row["project_id"], row["trigger"], key_sha256, started, t, outcome, json.dumps(details)))
+            if cur_row["key_sha256"] != key_sha256:
+                cur.execute("UPDATE send_domains SET test_running_until = NULL WHERE id = %s", (row["id"],))
+                return "key_changed"
+            interval = self.interval_hours(cur, row["project_id"], row["domain"])
+            requested_again = cur_row["test_requested_at"] is not None and cur_row["test_requested_at"] > started
+            if outcome == "unavailable":
+                cur.execute("UPDATE send_domains SET test_error = %s, test_checked_at = %s, test_next_at = %s, test_running_until = NULL, "
+                            "test_requested_at = IF(%s, test_requested_at, NULL) WHERE id = %s",
+                            ((details.get("error") or "unavailable")[:255], t, t + dt.timedelta(seconds=self.UNAVAILABLE_RETRY), requested_again, row["id"]))
+            else:
+                if outcome == "passed":
+                    nxt = t + dt.timedelta(hours=interval) if interval else None
+                else:
+                    nxt = t + dt.timedelta(seconds=min(self.FAILED_RETRY, (interval or 1) * 3600)) if interval else None
+                cur.execute("UPDATE send_domains SET test_status = %s, test_key_sha256 = %s, test_passed_at = IF(%s, %s, test_passed_at), test_checked_at = %s, "
+                            "test_details = %s, test_error = NULL, test_next_at = %s, test_running_until = NULL, "
+                            "test_requested_at = IF(%s, test_requested_at, NULL) WHERE id = %s",
+                            (outcome, key_sha256, outcome == "passed", t, t, json.dumps(details), nxt, requested_again, row["id"]))
+                if outcome == "passed":   # waiting mails go now (the gate checks again)
+                    cur.execute("""UPDATE send_messages m JOIN send_submissions s ON s.id = m.submission_row_id
+                                   SET m.next_attempt_at = %s
+                                   WHERE s.project_id = %s AND s.from_domain = %s
+                                     AND (m.status = 'waiting_test' OR (m.status = 'deferred' AND m.status_reason = 'dns_not_verified'))""",
+                                (t, row["project_id"], row["domain"]))
+            self.journal(cur, "send.domain.tested", row["customer_id"], row["project_id"], {
+                "domain": row["domain"], "outcome": outcome, "trigger": row["trigger"], "failed": details.get("failed") or [],
+                **({"error": details["error"]} if details.get("error") else {})}, t)
+            return outcome
+        return self._tx(run)
+
+    @staticmethod
+    def journal(cur, event, customer_id, project_id, details, t):
+        """Same as App\\Core\\Journal\\JournalWriter::append (sequence row locked, then insert)."""
+        cur.execute("SELECT next_id FROM journal_sequence WHERE id = 1 FOR UPDATE")
+        jid = int(cur.fetchone()["next_id"])
+        cur.execute("UPDATE journal_sequence SET next_id = next_id + 1 WHERE id = 1")
+        cur.execute("INSERT INTO journal (id, created_at, event, source, actor, customer_id, project_id, details) VALUES (%s, %s, %s, 'system', 'mr-sender', %s, %s, %s)",
+                    (jid, t, event, customer_id, project_id, json.dumps(details, ensure_ascii=False, separators=(",", ":"))))
+        return jid
+

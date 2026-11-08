@@ -1,6 +1,7 @@
 """Runs mailrunner_tx.queue against a real database for the PHP feature test tests/feature/Send/SendDeliveryTest.php.
 
-stdin: {"db": {host, port, user, password, database}, "steps": [{"claim": n} | {"record": {"<recipient>": "sent|bounced|deferred"}}]}
+stdin: {"db": {...}, "steps": [{"claim": n} | {"record": {"<recipient>": "sent|bounced|deferred"}}
+                               | {"due_tests": n} | {"record_test": {"outcome": "passed|failed|unavailable", "key": "<sha>"?, "details": {...}}}]}
 stdout: one JSON line per step. Database credentials come on stdin, never on the command line.
 """
 import datetime as dt
@@ -18,10 +19,18 @@ def main():
     req = json.load(sys.stdin)
     q = queue.Queue(req["db"])
     claimed = []
+    tests = []
     for step in req["steps"]:
         if "claim" in step:
             claimed, changed = q.claim(step["claim"])
             print(json.dumps({"claimed": sorted(m["recipient"] for m in claimed), "changed": sorted(changed), "pings": q.pending_pings}))
+        elif "due_tests" in step:
+            tests = q.due_tests(step["due_tests"])
+            print(json.dumps({"tests": [{"domain": r["domain"], "trigger": r["trigger"]} for r in tests]}))
+        elif "record_test" in step:
+            spec = step["record_test"]
+            out = [q.record_test(r, spec.get("key") or r["key_sha256"], queue.utcnow(), spec["outcome"], spec.get("details") or {}) for r in tests]
+            print(json.dumps({"recorded": out}))
         else:
             now = queue.utcnow()
             results = []

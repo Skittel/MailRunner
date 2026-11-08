@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MailRunner customer API (receive, send)
-  version: 0.2.4
+  version: 0.2.5
   description: |
     Pull API of a MailRunner node. A client application collects the messages the node accepted
     for its project. A token belongs to exactly one project and only sees that project's data.
@@ -385,6 +385,46 @@ paths:
       responses:
         '200': { description: 'OK, `deleted: false` if it did not exist' }
         '409': { $ref: '#/components/responses/ProjectType' }
+  /v1/domains/{domain}/test:
+    parameters:
+      - { name: domain, in: path, required: true, schema: { type: string } }
+    post:
+      summary: Start a domain test now
+      description: |
+        The node tests the domain (also on its own: after a key change, when a mail waits for a test and in the test
+        interval). DNS pre-check (SPF for every source address of the node, DKIM record = stored key), then one test
+        mail per address family to SmartMailFlow; the project's criteria decide. A test takes up to about four
+        minutes; read the result from GET /v1/domains/{domain} (test). A mail of a domain without a valid test waits
+        up to 5 minutes and then fails with dns_not_verified.
+      responses:
+        '202': { description: 'requested', content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/SendDomain' } } } ] } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/domains/{domain}/tests:
+    parameters:
+      - { name: domain, in: path, required: true, schema: { type: string } }
+    get:
+      summary: The last 20 test runs of a domain (kept 30 days)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            started_at: { type: string, format: date-time }
+                            finished_at: { type: string, format: date-time }
+                            trigger: { type: string, enum: [waiting, requested, interval] }
+                            outcome: { type: string, enum: [passed, failed, unavailable] }
+                            key_sha256: { type: string }
+                            details: { type: object }
   /v1/dkim/generate:
     post:
       summary: Generate a DKIM key pair (stores nothing)
@@ -828,6 +868,19 @@ components:
             key_sha256: { type: string, description: 'SHA-256 of the public key; compare it across nodes' }
         dns: { $ref: '#/components/schemas/DkimDnsRecord' }
         allowed: { type: [boolean, 'null'], description: 'false if the operator no longer allows the domain for the project' }
+        test:
+          type: object
+          description: 'domain test of this node; the domain sends only while valid is true'
+          properties:
+            status: { type: string, enum: [untested, passed, failed], description: 'a test made with an older key counts as untested' }
+            valid: { type: boolean }
+            passed_at: { type: string, format: date-time, nullable: true }
+            checked_at: { type: string, format: date-time, nullable: true }
+            next_at: { type: string, format: date-time, nullable: true, description: 'next interval test (shortest test_interval_hours of the profiles using the domain)' }
+            requested: { type: boolean }
+            running: { type: boolean }
+            error: { type: string, nullable: true, description: 'the last run could not finish (e.g. SmartMailFlow unavailable); the previous result stays' }
+            details: { type: object, nullable: true, description: 'criteria, pre-check (SPF per family, DKIM record), checks per family (family, spf, dkim, dmarc, dmarc_policy, blacklist, tls), failed' }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     SendSubmission:

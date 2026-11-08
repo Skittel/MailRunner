@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(HERE, ".."))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "receive"))
 
 from mailrunner_rx import config, crypto  # noqa: E402
-from mailrunner_tx import queue, settings, smtp, worker  # noqa: E402
+from mailrunner_tx import domaintest, queue, settings, smtp, worker  # noqa: E402
 
 LEVELS = {"info": syslog.LOG_INFO, "warning": syslog.LOG_WARNING, "error": syslog.LOG_ERR}
 
@@ -36,7 +36,8 @@ async def main():
         await stop.wait()
         return
     key = crypto.load_key(s.node_key_file)
-    w = worker.Worker(s, queue.Queue(s.db), key, crypto.decrypt, smtp.make_resolver(config.RESOLVER), log)
+    w = worker.Worker(s, queue.Queue(s.db), key, crypto.decrypt, smtp.make_resolver(config.RESOLVER), log,
+                      dns_check=domaintest.DnsCheck(config.RESOLVER))
     log("info", f"starting: helo {s.helo}, {len(s.ipv4)} IPv4, {len(s.ipv6)} IPv6, {worker.CONCURRENCY} parallel deliveries")
     await w.run(stop)
     log("info", "stopped")

@@ -19,6 +19,8 @@ use App\Core\Support\ConfigException;
  * PUT    /v1/domains/{domain}              {"selector": "...", "private_key": "...", "algorithm"?: "rsa"|"ed25519"}
  *                                          set or replace the key (idempotent); the private key is never returned
  * DELETE /v1/domains/{domain}
+ * POST   /v1/domains/{domain}/test         start a domain test now (202); the result appears in "test"
+ * GET    /v1/domains/{domain}/tests        the last 20 test runs
  * POST   /v1/dkim/generate                 {"domain": "...", "algorithm"?: "rsa"|"ed25519", "bits"?: 2048|3072|4096}
  *                                          -> {selector, algorithm, bits, private_key, dns}; stores nothing: the
  *                                          application keeps the key and sets it with PUT /v1/domains/{domain}
@@ -56,6 +58,25 @@ class SendDomains extends BaseController
             [$row, $changed] = $this->service()->set(CurrentToken::projectId(), urldecode($domain), $b['selector'], $b['private_key'], $b['algorithm'] ?? null, $this->ctx());
 
             return ApiResponse::ok(['data' => SendDomainService::present($row), 'changed' => $changed]);
+        });
+    }
+
+    public function test(string $domain)
+    {
+        return $this->guard(function () use ($domain) {
+            $row = $this->service()->requestTest(CurrentToken::projectId(), urldecode($domain), $this->ctx());
+
+            return ApiResponse::ok(['data' => SendDomainService::present($row, $this->service()->sendProject(CurrentToken::projectId(), false))], 202);
+        });
+    }
+
+    public function tests(string $domain)
+    {
+        return $this->guard(function () use ($domain) {
+            $project = $this->service()->sendProject(CurrentToken::projectId(), false);
+            $row     = $this->service()->get((int) $project['id'], urldecode($domain)) ?? throw new ConfigException('DOMAIN_NOT_FOUND', 'Domain not set');
+
+            return ApiResponse::ok(['data' => $this->service()->tests($row)]);
         });
     }
 

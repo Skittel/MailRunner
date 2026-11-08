@@ -2,6 +2,22 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
+## 0.2.5 - 2026-11-08
+Send role, step 5 of 7 (decision E-27): domain test. From now on a domain with a passed test sends.
+- mr-sender tests a domain when its key changes (`PUT /v1/domains/{domain}`), when a mail waits for a test, on
+  `POST /v1/domains/{domain}/test` and in the interval (shortest `test_interval_hours` of the enabled profiles that
+  send from the domain). At most two tests at once, leased (`test_running_until`).
+- DNS pre-check without mail: SPF of the domain for every source address of the node (pyspf), the DKIM record
+  `<selector>._domainkey.<domain>` carries the stored key. A clear failure ends the test without a mail.
+- One test mail per address family of the node to `<id>@ip4.smartmailflow.email` (IPv4) and
+  `<id>@ip6.smartmailflow.email` (IPv6), new random ids per run, signed like customer mail; results from the
+  SmartMailFlow API, judged by the project criteria (spf, dkim, dmarc, dmarc_policy, blacklist); the mail must have
+  arrived over the tested family.
+- SmartMailFlow unreachable or no result within 4 minutes: `unavailable`, not a failure; the last result stays,
+  retry in 10 minutes. A failed test stops sending at once and is repeated after an hour (or on request).
+- A passed test releases waiting mail at once. The state is in `GET /v1/domains/{domain}` (`test`: status, valid,
+  details, next_at, error), every run in `GET /v1/domains/{domain}/tests` (30 days). Journal `send.domain.tested`.
+
 ## 0.2.4 - 2026-11-08
 Send role, step 4 of 7 (decision E-27): delivery worker. Nothing leaves a node yet: a domain only sends after a
 passed domain test (step 5), and no domain can pass one before that step.

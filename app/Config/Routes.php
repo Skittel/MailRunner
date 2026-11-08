@@ -36,6 +36,8 @@ $routes->group('v1', ['filter' => 'bearer'], static function (RouteCollection $r
         $routes->get('domains/(:segment)', '\App\Controllers\V1\SendDomains::show/$1');
         $routes->put('domains/(:segment)', '\App\Controllers\V1\SendDomains::put/$1');
         $routes->delete('domains/(:segment)', '\App\Controllers\V1\SendDomains::delete/$1');
+        $routes->post('domains/(:segment)/test', '\App\Controllers\V1\SendDomains::test/$1');
+        $routes->get('domains/(:segment)/tests', '\App\Controllers\V1\SendDomains::tests/$1');
         $routes->post('dkim/generate', '\App\Controllers\V1\SendDomains::generate');
         $routes->post('send', '\App\Controllers\V1\Send::submit');
         $routes->get('send/submissions/(:segment)', '\App\Controllers\V1\Send::submission/$1');

@@ -8,35 +8,16 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-import dkim
-
-from . import schedule, smtp
+from . import domaintest, schedule, smtp
+from .signing import SIGN_HEADERS, LocalError, sign  # noqa: F401 (used by tests and domaintest)
 from .queue import utcnow
 
 CONCURRENCY = 20
 PER_DOMAIN = 3
 POLL_SECONDS = 1.0
 GROUP_TIMEOUT = 900
-SIGN_HEADERS = [b"from", b"sender", b"reply-to", b"subject", b"date", b"message-id", b"to", b"cc", b"mime-version",
-                b"content-type", b"content-transfer-encoding", b"in-reply-to", b"references", b"list-unsubscribe",
-                b"list-unsubscribe-post"]
-
-
-class LocalError(Exception):
-    """The mail cannot be prepared on this node (file or key missing or damaged): no SMTP attempt."""
-
-
-def sign(raw, selector, domain, algorithm, private_key):
-    present = {line.split(b":", 1)[0].strip().lower() for line in raw.split(b"\r\n\r\n", 1)[0].split(b"\r\n") if b":" in line and line[:1] not in (b" ", b"\t")}
-    headers = [h for h in SIGN_HEADERS if h in present]
-    try:
-        sig = dkim.sign(raw, selector.encode(), domain.encode(), private_key, include_headers=headers,
-                        signature_algorithm=b"ed25519-sha256" if algorithm == "ed25519" else b"rsa-sha256")
-    except Exception as e:
-        raise LocalError(f"DKIM signing failed ({e.__class__.__name__})") from e
-    return sig + raw
-
-
+MAX_TESTS = 2            # domain tests at once
+TEST_POLL_SECONDS = 10
 def decide(message, tried, now):
     """New status of a message after a delivery attempt: (status, reason, next_attempt_at)."""
     if tried is None:
@@ -54,7 +35,7 @@ def decide(message, tried, now):
 
 
 class Worker:
-    def __init__(self, settings, queue, node_key, decrypt, resolver, log, deliver=smtp.deliver):
+    def __init__(self, settings, queue, node_key, decrypt, resolver, log, deliver=smtp.deliver, dns_check=None, run_test=domaintest.run_test):
         self.s = settings
         self.queue = queue
         self.key = node_key
@@ -65,6 +46,10 @@ class Worker:
         self.db = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mr-sender-db")
         self.domains = {}
         self.tasks = set()
+        self.tests = set()
+        self.dns_check = dns_check
+        self.run_test = run_test
+        self.next_test_poll = 0.0
 
     async def _db(self, fn, *args):
         return await asyncio.get_running_loop().run_in_executor(self.db, fn, *args)
@@ -93,12 +78,42 @@ class Worker:
                     task = asyncio.create_task(self.handle(group))
                     self.tasks.add(task)
                     task.add_done_callback(self.tasks.discard)
+            if time.monotonic() >= self.next_test_poll and len(self.tests) < MAX_TESTS:
+                self.next_test_poll = time.monotonic() + TEST_POLL_SECONDS
+                try:
+                    for row in await self._db(self.queue.due_tests, MAX_TESTS - len(self.tests)):
+                        task = asyncio.create_task(self.domain_test(row))
+                        self.tests.add(task)
+                        task.add_done_callback(self.tests.discard)
+                except Exception as e:
+                    self.log("error", f"domain test lookup failed: {e.__class__.__name__}: {e}")
             try:
                 await asyncio.wait_for(stop.wait(), POLL_SECONDS)
             except asyncio.TimeoutError:
                 pass
         if self.tasks:   # let running deliveries finish (their leases protect against a restart)
             await asyncio.wait(self.tasks, timeout=60)
+        for t in self.tests:   # a domain test can take minutes: its lease runs out, another run repeats it
+            t.cancel()
+
+    async def domain_test(self, row):
+        started = utcnow()
+        try:
+            private = self.decrypt(self.key, row["dkim_private_enc"], f"dkim:{row['project_id']}:{row['domain']}")
+            outcome, details = await self.run_test(row, self.s, private, self.dns_check, deliver=self.deliver, resolver=self.resolver)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            self.log("error", f"domain test error domain={row['domain']}: {e.__class__.__name__}: {e}")
+            outcome, details = "unavailable", {"error": f"internal error ({e.__class__.__name__})"}
+        try:
+            stored = await self._db(self.queue.record_test, row, row["key_sha256"], started, outcome, details)
+        except Exception as e:
+            self.log("error", f"domain test not recorded domain={row['domain']}: {e.__class__.__name__}: {e}")
+            return
+        self.log("info", f"domain test domain={row['domain']} project_id={row['project_id']} trigger={row['trigger']} outcome={outcome}"
+                         + (f" failed={','.join(details.get('failed') or [])}" if details.get("failed") else "")
+                         + (f" error={details['error']}" if details.get("error") else "") + (" (key changed meanwhile)" if stored == "key_changed" else ""))
 
     @staticmethod
     def groups(rows):
