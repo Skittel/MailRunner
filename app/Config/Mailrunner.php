@@ -116,6 +116,12 @@ class Mailrunner extends BaseConfig
         return $this->dataDir . '/secrets/common.env';
     }
 
+    /** Send role: mails waiting for delivery, encrypted with the node key (one file per submission). */
+    public function sendStoreDir(): string
+    {
+        return $this->dataDir . '/send/store';
+    }
+
     public function receiveStoreDir(): string
     {
         return $this->dataDir . '/receive/store';

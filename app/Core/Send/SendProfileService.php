@@ -118,6 +118,8 @@ class SendProfileService
                 'changed' => $old === null ? null : array_keys(array_diff_assoc(array_map('strval', array_intersect_key($row, $old)), array_map('strval', array_intersect_key($old, $row)))),
             ]);
 
+            ProjectService::requestApply(); // mail path rules (send.json)
+
             return [$new, true, $old === null];
         });
     }
@@ -136,6 +138,7 @@ class SendProfileService
             $this->journal->append('send.profile.deleted', $ctx, (int) $project['customer_id'], $projectId, [
                 'profile_id' => $old['profile_id'], 'name' => $old['name'], 'accesses_revoked' => $revoked,
             ]);
+            ProjectService::requestApply();
 
             return true;
         });

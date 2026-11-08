@@ -5,6 +5,7 @@ namespace App\Core\Send;
 use App\Core\Access\ApiTokenService;
 use App\Core\Access\SmtpCredentialService;
 use App\Core\Journal\JournalWriter;
+use App\Core\Projects\ProjectService;
 use App\Core\Support\ChangeContext;
 use App\Core\Support\ConfigException;
 use App\Core\Support\RandomId;
@@ -158,6 +159,7 @@ class SendAccessService
             $this->journal->append('send.access.created', $ctx, (int) $project['customer_id'], $projectId, [
                 'access_id' => $accessId, 'profile' => $profile['name'], 'type' => $type,
             ]);
+            ProjectService::requestApply(); // mail path (credentials.json, send.json, send_clients.cidr)
 
             return ['access' => $this->get($projectId, $accessId)] + $extra;
         });
@@ -212,6 +214,7 @@ class SendAccessService
             $this->journal->append('send.access.updated', $ctx, (int) $project['customer_id'], $projectId, [
                 'access_id' => $accessId, 'profile' => $a['profile_name'], 'changed' => array_keys($changes),
             ]);
+            ProjectService::requestApply(); // mail path (credentials.json, send.json, send_clients.cidr)
 
             return $this->get($projectId, $accessId);
         });
@@ -256,6 +259,7 @@ class SendAccessService
             $this->journal->append('send.access.rotated', $ctx, (int) $project['customer_id'], $projectId, [
                 'access_id' => $accessId, 'profile' => $a['profile_name'], 'type' => $a['type'], 'grace_seconds' => $grace,
             ]);
+            ProjectService::requestApply(); // mail path (credentials.json, send.json, send_clients.cidr)
 
             return ['access' => $this->get($projectId, $accessId)] + $extra;
         });
@@ -270,6 +274,7 @@ class SendAccessService
             $this->journal->append('send.access.revoked', $ctx, (int) $project['customer_id'], $projectId, [
                 'access_id' => $accessId, 'profile' => $a['profile_name'], 'type' => $a['type'],
             ]);
+            ProjectService::requestApply(); // mail path (credentials.json, send.json, send_clients.cidr)
         });
     }
 

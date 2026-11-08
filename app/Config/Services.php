@@ -97,6 +97,15 @@ class Services extends BaseService
         return new \App\Core\Send\SendProfileService(db_connect(), static::journalWriter(), static::sendDomainService());
     }
 
+    public static function sendSubmissionService(bool $getShared = true): \App\Core\Send\SendSubmissionService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('sendSubmissionService');
+        }
+
+        return new \App\Core\Send\SendSubmissionService(db_connect(), static::journalWriter(), static::sendDomainService(), config('Mailrunner')->sendStoreDir());
+    }
+
     public static function sendAccessService(bool $getShared = true): \App\Core\Send\SendAccessService
     {
         if ($getShared) {

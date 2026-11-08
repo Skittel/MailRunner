@@ -2,6 +2,27 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
+## 0.2.2 - 2026-11-08
+Send role, step 3 of 7 (decision E-27): submission. Mail is accepted and queued encrypted; nothing is delivered yet
+(delivery worker: step 4, domain test: step 5).
+- `POST /v1/send` with the token of an api access: structured message (from, to/cc/bcc, reply_to, subject, text,
+  html, custom headers, attachments incl. inline images) or raw message (`raw` base64, recipients from the request or
+  from To/Cc/Bcc). `GET /v1/send/submissions/{id}`, `GET /v1/send/messages/{id}` (send and project tokens).
+- SMTP: a send login (ports 25/587/465) or a client inside an ip access (port 25, no login) makes the transaction a
+  submission. mr-milter checks sender and recipients early (generated `send.json`), at end of data
+  `spark mr:send:accept` decides with the same code as the API and the milter answers DISCARD (250) or the refusal.
+  Postfix never delivers submissions itself. Postfix relays for ip accesses via the generated `send_clients.cidr`;
+  send logins are in `credentials.json` with scope `send`.
+- Checks: access and profile enabled; envelope sender and header From allowed by the profile (exact address or
+  exact domain), From domain allowed by the project and set up with a DKIM key; 1-100 recipients allowed by the
+  profile; at most 20 MB; limits per hour and day of profile and project (rolling, per recipient).
+  API: 403/413/422/429; SMTP: 550 (rules), 451 (limits, temporary problems).
+- One submission, one message per recipient (status `queued`, retry settings of the profile), the mail stored once
+  in `send/store` encrypted with the node key; Bcc removed, Date and Message-ID added when missing.
+- Journal `send.submitted` (ids, profile, access, count, size, sender domain; no addresses) and `send.rejected`.
+- Install: `/var/lib/mailrunner/send/store`, milter may write `send` and `writable`, nginx allows 30 MB for
+  `/v1/send`.
+
 ## 0.2.1 - 2026-11-08
 Send role, step 2 of 7 (decision E-27): send profiles and accesses. Nothing is sent yet.
 - Customer API `GET /v1/send-profiles`, `GET|PUT|DELETE /v1/send-profiles/{name}`: a profile is defined

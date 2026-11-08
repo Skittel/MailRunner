@@ -1,5 +1,5 @@
 [Unit]
-Description=MailRunner: receive milter (store, analyse, decide before 250)
+Description=MailRunner: milter (receive: store, analyse, decide before 250; send: hand submissions to the queue)
 After=network-online.target unbound.service
 Wants=network-online.target
 Before=postfix.service
@@ -15,7 +15,8 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/var/lib/mailrunner/receive
+# send role: submissions are queued by "spark mr:send:accept" (send/store, writable for logs and cache)
+ReadWritePaths=/var/lib/mailrunner/receive /var/lib/mailrunner/send /var/lib/mailrunner/writable
 
 [Install]
 WantedBy=multi-user.target

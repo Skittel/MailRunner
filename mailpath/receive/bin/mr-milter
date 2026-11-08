@@ -10,6 +10,10 @@ Profile "analysis" keeps no raw mail: only the analysis file and the database me
 SMTP AUTH (ports 25/587/465, login checked by mr-auth): the login decides the project, there is no recipient
 check; the mail is stored like MX mail with received_via=auth and the credential id.
 
+Send role (E-27, mailrunner_rx/send.py): a send login, or a client inside an ip send access, makes the transaction a
+submission. Sender and recipients are checked early against the profile; at end of data `spark mr:send:accept`
+queues the mail (or refuses it) and the milter answers DISCARD or the refusal. No analysis, nothing is stored here.
+
 Runs as systemd service mailrunner-milter (user mailrunner). Postfix: smtpd_milters, milter_default_action = tempfail.
 """
 import email
@@ -25,7 +29,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..
 
 import Milter  # noqa: E402
 
-from mailrunner_rx import analyzer, auth, config, crypto, message, secrets, store  # noqa: E402
+from mailrunner_rx import analyzer, auth, config, crypto, message, secrets, send, store  # noqa: E402
 from mailrunner_rx.routes import Routes  # noqa: E402
 
 
@@ -50,6 +54,7 @@ class RouteCache:
 
 ROUTES = RouteCache()
 CREDENTIALS = auth.Credentials(os.path.join(config.CONFIG_DIR, "generated", "current", "credentials.json"))
+SEND = send.SendConfig()
 
 
 def log(level, text):
@@ -95,6 +100,8 @@ class ReceiveMilter(Milter.Base):
         self.size = 0
         self.auth = None        # credential entry of an authenticated session
         self.auth_username = None
+        self.send_access = None  # access_id when this transaction is a submission (send role)
+        self.send_rules = None
 
     # Ask Postfix for headers with their original leading space (exact raw rebuild for DKIM).
     def negotiate(self, opts):
@@ -136,11 +143,37 @@ class ReceiveMilter(Milter.Base):
             if self.auth is None:   # revoked between AUTH and MAIL FROM
                 self.setreply("454", "4.7.0", "Login no longer valid")
                 return Milter.TEMPFAIL
+        if self.auth is not None and self.auth.get("scope") == "send":
+            self.send_access = self.auth.get("access_id")
+        elif self.auth is None:
+            self.send_access = SEND.access_for_ip(self.client_ip)
+        if self.send_access is not None:
+            self.send_rules = SEND.access(self.send_access)
+            if self.send_rules is None:   # access changed since the login / connect
+                self.setreply("454", "4.7.0", "Send access no longer valid")
+                return Milter.TEMPFAIL
+            refused = send.check_sender(self.send_rules, self.mail_from)
+            self.session_log("mail", f"from=<{log_safe(self.mail_from)}> send={self.send_access}" + (f" refused={refused[0]}" if refused else ""))
+            if refused:
+                return self.refuse(refused)
+            return Milter.CONTINUE
         self.session_log("mail", f"from=<{log_safe(self.mail_from)}>" + (f" auth={self.auth['credential_id']}" if self.auth else ""))
         return Milter.CONTINUE
 
+    def refuse(self, reply):
+        code, enhanced, text = reply
+        self.setreply(code, enhanced, send.smtp_text(text))
+        return Milter.REJECT if code.startswith("5") else Milter.TEMPFAIL
+
     def envrcpt(self, to, *params):
         addr = strip_brackets(to)
+        if self.send_access is not None:
+            refused = send.check_recipient(self.send_rules, addr, len(self.recipients))
+            self.session_log("rcpt", f"to=<{log_safe(addr)}> result={'refused' if refused else 'accepted'} send={self.send_access}")
+            if refused:
+                return self.refuse(refused)
+            self.recipients.append((addr, None))
+            return Milter.CONTINUE
         if self.auth is not None:
             # SMTP AUTH: the login decides the project, no recipient check (Postfix: permit_sasl_authenticated)
             route = {"project_id": self.auth["project_id"], "project": self.auth["project"], "profile": self.auth["profile"], "role": None}
@@ -182,6 +215,8 @@ class ReceiveMilter(Milter.Base):
             if len(self.recipients) != 1:
                 received = received.replace(b"\tfor <>; ", b"\t")
             raw = received + message.build_raw(self.headers, self.body_chunks)
+            if self.send_access is not None:
+                return self.submit(raw, queue_id)
             outcome = self.process(raw, queue_id, started)
         except Exception as e:
             log(syslog.LOG_ERR, f"queue_id={queue_id} tempfail: {e.__class__.__name__}: {e}")
@@ -191,6 +226,19 @@ class ReceiveMilter(Milter.Base):
             self.setreply("451", "4.7.0", "Message check not finished, please try again later")
             return Milter.TEMPFAIL
         return Milter.DISCARD  # 250 to the client; Postfix drops its queue copy
+
+    def submit(self, raw, queue_id):
+        """Send role: hand the submission to mr:send:accept; DISCARD when queued, else the refusal."""
+        answer = send.accept({"access_id": self.send_access, "mail_from": self.mail_from, "rcpts": [r for r, _ in self.recipients],
+                              "raw": raw, "smtp_service": self.service or None, "client_ip": self.client_ip or None,
+                              "username": self.auth_username or None})
+        if answer.get("ok"):
+            log(syslog.LOG_INFO, f"queued submission={answer.get('submission_id')} queue_id={queue_id} access={self.send_access} "
+                                 f"project={self.send_rules.get('project')} recipients={len(self.recipients)} size={len(raw)}")
+            return Milter.DISCARD  # 250 to the client; Postfix drops its copy, the send worker delivers
+        log(syslog.LOG_WARNING, f"send refused queue_id={queue_id} access={self.send_access} code={answer.get('code')} "
+                                f"error={answer.get('error')}" + (f" detail={answer['detail']}" if answer.get("detail") else ""))
+        return self.refuse((str(answer.get("code") or "451"), str(answer.get("enhanced") or "4.3.0"), answer.get("message")))
 
     def process(self, raw, queue_id, started):
         key = crypto.load_key(config.NODE_KEY_FILE)

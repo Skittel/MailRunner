@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MailRunner customer API (receive, send)
-  version: 0.2.1
+  version: 0.2.2
   description: |
     Pull API of a MailRunner node. A client application collects the messages the node accepted
     for its project. A token belongs to exactly one project and only sees that project's data.
@@ -424,6 +424,87 @@ paths:
                           dns: { $ref: '#/components/schemas/DkimDnsRecord' }
         '409': { $ref: '#/components/responses/ProjectType' }
         '422': { description: 'INVALID_DOMAIN, INVALID_DKIM_KEY (unknown algorithm or bits)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/send:
+    post:
+      summary: Submit a mail for sending
+      description: |
+        Needs the token of an `api` access of a send profile (a project token gets `403 SEND_ACCESS_REQUIRED`).
+        Either a structured message or a raw message (`raw`, base64; recipients from `recipients` or from To, Cc and
+        Bcc). The node checks the profile (senders: envelope and From, exact address or exact domain; recipients),
+        the project (sender domain allowed and set up with a DKIM key) and the limits (per recipient, rolling 60
+        minutes and 24 hours, profile and project). An accepted mail gets one message per recipient (`queued`) and is
+        stored encrypted; a Bcc header is never kept, Date and Message-ID are added when missing.
+        SMTP: the same checks for smtp and ip accesses; refusals as 550 (rules) or 451 (limits, temporary problems).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [from, subject]
+                  properties:
+                    from: { type: string, example: 'Shop <info@shop.example>' }
+                    to: { oneOf: [ { type: string }, { type: array, items: { type: string } } ] }
+                    cc: { oneOf: [ { type: string }, { type: array, items: { type: string } } ] }
+                    bcc: { oneOf: [ { type: string }, { type: array, items: { type: string } } ] }
+                    reply_to: { type: string }
+                    subject: { type: string, maxLength: 998 }
+                    text: { type: string }
+                    html: { type: string }
+                    headers: { type: object, additionalProperties: { type: string }, description: 'custom headers; From, To, Subject, Date, Message-ID, Content-* and similar are reserved' }
+                    attachments:
+                      type: array
+                      maxItems: 50
+                      items:
+                        type: object
+                        required: [filename, content]
+                        properties:
+                          filename: { type: string }
+                          content_type: { type: string, default: application/octet-stream }
+                          content: { type: string, description: base64 }
+                          inline: { type: boolean, default: false, description: 'part of the HTML (multipart/related), needs content_id' }
+                          content_id: { type: string }
+                - type: object
+                  required: [raw]
+                  properties:
+                    raw: { type: string, description: 'complete message (RFC 5322) as base64, at most 20 MB' }
+                    recipients: { type: array, items: { type: string }, description: 'envelope recipients; default: To, Cc and Bcc of the message' }
+      responses:
+        '202':
+          description: Accepted and queued
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          submission_id: { type: string, example: mrs_k3f9x2m7q1w8e4r6 }
+                          messages: { type: array, items: { type: object, properties: { message_id: { type: string }, recipient: { type: string }, status: { type: string } } } }
+        '403': { description: 'SEND_ACCESS_REQUIRED, ACCESS_DISABLED, PROJECT_DISABLED', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { description: MESSAGE_TOO_LARGE, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: 'SENDER_NOT_ALLOWED, DKIM_MISSING, INVALID_FROM, INVALID_RECIPIENT, RECIPIENT_NOT_ALLOWED, INVALID_MESSAGE, INVALID_REQUEST', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { description: 'LIMIT_REACHED (profile or project)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/send/submissions/{submission_id}:
+    parameters:
+      - { name: submission_id, in: path, required: true, schema: { type: string } }
+    get:
+      summary: A submission with its messages
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { allOf: [ { $ref: '#/components/schemas/SendSubmission' }, { type: object, properties: { messages: { type: array, items: { $ref: '#/components/schemas/SendMessage' } } } } ] } } } ] } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/send/messages/{message_id}:
+    parameters:
+      - { name: message_id, in: path, required: true, schema: { type: string } }
+    get:
+      summary: One message (one recipient) with its submission
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { allOf: [ { $ref: '#/components/schemas/SendMessage' }, { type: object, properties: { submission: { $ref: '#/components/schemas/SendSubmission' } } } ] } } } ] } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
   /v1/send-profiles:
     get:
       summary: Send profiles of the project
@@ -722,6 +803,33 @@ components:
             key_sha256: { type: string, description: 'SHA-256 of the public key; compare it across nodes' }
         dns: { $ref: '#/components/schemas/DkimDnsRecord' }
         allowed: { type: [boolean, 'null'], description: 'false if the operator no longer allows the domain for the project' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    SendSubmission:
+      type: object
+      properties:
+        submission_id: { type: string }
+        profile: { type: string }
+        access_id: { type: string }
+        via: { type: string, enum: [api, smtp] }
+        smtp_service: { type: string, nullable: true }
+        envelope_from: { type: string }
+        from: { type: string }
+        subject: { type: string, nullable: true }
+        message_id_header: { type: string }
+        recipients: { type: integer }
+        size: { type: integer }
+        created_at: { type: string, format: date-time }
+    SendMessage:
+      type: object
+      properties:
+        message_id: { type: string, example: mrm_7hq2m0x4k9d3a1b5 }
+        recipient: { type: string }
+        status: { type: string, enum: [queued, waiting_test, sending, deferred, sent, bounced, failed] }
+        status_reason: { type: string, nullable: true }
+        attempts: { type: integer }
+        next_attempt_at: { type: string, format: date-time, nullable: true }
+        expires_at: { type: string, format: date-time }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     SendProfile:

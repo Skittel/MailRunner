@@ -125,7 +125,7 @@ install -d -o mailrunner -g mailrunner -m 0700 /var/lib/mailrunner/secrets   # c
 install -d -o mailrunner -g mailrunner -m 0750 /var/lib/mailrunner /var/lib/mailrunner/receive \
     /var/lib/mailrunner/receive/spool /var/lib/mailrunner/receive/spool/tmp /var/lib/mailrunner/receive/spool/new \
     /var/lib/mailrunner/receive/spool/analyzed /var/lib/mailrunner/receive/spool/failed /var/lib/mailrunner/receive/store \
-    /var/lib/mailrunner/receive/spool/smtp \
+    /var/lib/mailrunner/receive/spool/smtp /var/lib/mailrunner/send /var/lib/mailrunner/send/store \
     /var/lib/mailrunner/writable /var/lib/mailrunner/writable/cache /var/lib/mailrunner/writable/logs \
     /var/lib/mailrunner/writable/session /var/lib/mailrunner/writable/uploads /var/lib/mailrunner/writable/debugbar \
     /var/lib/mailrunner/update

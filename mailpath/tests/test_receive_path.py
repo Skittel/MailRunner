@@ -250,6 +250,7 @@ class MilterTest(unittest.TestCase):
         for p in self.patches:
             p.start()
         self.mm.ROUTES = self.mm.RouteCache()
+        self.mm.SEND = self.mm.send.SendConfig(os.path.join(self.tmp.name, "send.json"))  # no send accesses
 
     def tearDown(self):
         for p in self.patches:
