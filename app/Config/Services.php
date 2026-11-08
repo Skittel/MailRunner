@@ -87,4 +87,23 @@ class Services extends BaseService
 
         return new \App\Core\Send\SendDomainService(db_connect(), static::journalWriter());
     }
+
+    public static function sendProfileService(bool $getShared = true): \App\Core\Send\SendProfileService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('sendProfileService');
+        }
+
+        return new \App\Core\Send\SendProfileService(db_connect(), static::journalWriter(), static::sendDomainService());
+    }
+
+    public static function sendAccessService(bool $getShared = true): \App\Core\Send\SendAccessService
+    {
+        if ($getShared) {
+            return static::getSharedInstance('sendAccessService');
+        }
+
+        return new \App\Core\Send\SendAccessService(db_connect(), static::journalWriter(), static::sendDomainService(),
+            static::sendProfileService(), static::apiTokenService(), static::smtpCredentialService());
+    }
 }

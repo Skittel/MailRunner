@@ -20,6 +20,9 @@ use CodeIgniter\Database\BaseConnection;
  * Central tokens: once MailRunner Admin has sent the token set of a project (sync()), the project's tokens come
  * only from the admin (same token on every node of the project). Local create/rotate is refused then; a local
  * revoke stays possible as an emergency stop and is never undone by a later sync.
+ *
+ * Scope: "manage" tokens use the project API; "send" tokens belong to one access of a send profile (E-27) and may
+ * only submit mail. Send tokens are local to the node: never listed for, synced from or revoked by the admin.
  */
 class ApiTokenService
 {
@@ -53,23 +56,40 @@ class ApiTokenService
     }
 
     /**
+     * Creates the token of a send access (scope send, always local; the caller holds the project lock).
+     *
+     * @param array<string, mixed> $project
+     *
+     * @return array{token: array<string, mixed>, secret: string, bearer: string}
+     */
+    public function createSendToken(array $project, string $label, ?int $expiresInSeconds, ChangeContext $ctx): array
+    {
+        return $this->insertToken($project, self::normalizeLabel($label), $expiresInSeconds, $ctx, null, 'token.created', ['scope' => 'send'], 'send');
+    }
+
+    /**
      * Rotates a token: creates a successor with the same label and lets the old one
      * expire after the grace period (0 = revoke immediately).
      *
      * @return array{token: array<string, mixed>, secret: string, bearer: string, old: array<string, mixed>}
      */
-    public function rotate(string $tokenId, int $graceSeconds, ChangeContext $ctx): array
+    public function rotate(string $tokenId, int $graceSeconds, ChangeContext $ctx, bool $sendAccess = false): array
     {
-        return Transaction::run($this->db, function () use ($tokenId, $graceSeconds, $ctx): array {
+        return Transaction::run($this->db, function () use ($tokenId, $graceSeconds, $ctx, $sendAccess): array {
             $old     = $this->getActive($tokenId);
+            if (($old['scope'] === 'send') !== $sendAccess) {
+                throw new ConfigException('TOKEN_SCOPE', $sendAccess ? 'Not a send token' : 'Token "' . $tokenId . '" belongs to a send access; rotate it with POST /v1/send-accesses/{access_id}/rotate');
+            }
             $project = $this->projects->getForChange(ProjectService::refOf($this->projects->getById((int) $old['project_id'])), $ctx);
-            self::assertLocal($project);
+            if ($old['scope'] !== 'send') {
+                self::assertLocal($project);
+            }
 
             $expiresIn = $old['expires_at'] === null ? null
                 : max(0, strtotime($old['expires_at'] . ' UTC') - time());
             $new = $this->insertToken($project, $old['label'], $expiresIn, $ctx, (int) $old['id'], 'token.rotated', [
                 'replaces' => $old['token_id'], 'grace_seconds' => $graceSeconds,
-            ]);
+            ], $old['scope']);
 
             if ($graceSeconds === 0) {
                 $this->db->table('api_tokens')->where('id', $old['id'])->update(['revoked_at' => Time::now()]);
@@ -131,7 +151,7 @@ class ApiTokenService
 
         return $this->db->table('api_tokens')
             ->select('token_id, label, created_at, created_source, expires_at, revoked_at, last_used_at, rotated_from_id')
-            ->where('project_id', $project['id'])->orderBy('id')->get()->getResultArray();
+            ->where('project_id', $project['id'])->where('scope', 'manage')->orderBy('id')->get()->getResultArray();
     }
 
     /**
@@ -190,12 +210,14 @@ class ApiTokenService
         ?int $rotatedFromId,
         string $event,
         array $extraDetails = [],
+        string $scope = 'manage',
     ): array {
         $tokenId = RandomId::publicId(self::ID_PREFIX);
         $secret  = RandomId::secret();
         $this->db->table('api_tokens')->insert([
             'token_id'        => $tokenId,
             'project_id'      => $project['id'],
+            'scope'           => $scope,
             'label'           => $label,
             'secret_hash'     => hash('sha256', $secret),
             'created_at'      => Time::now(),
@@ -247,11 +269,11 @@ class ApiTokenService
             $pid     = (int) $project['id'];
             $stats   = ['added' => 0, 'updated' => 0, 'revoked' => 0];
             $have    = [];
-            foreach ($this->db->table('api_tokens')->where('project_id', $pid)->get()->getResultArray() as $t) {
+            foreach ($this->db->table('api_tokens')->where('project_id', $pid)->where('scope', 'manage')->get()->getResultArray() as $t) {
                 $have[$t['token_id']] = $t;
             }
             if ($rows !== []) {
-                foreach ($this->db->table('api_tokens')->select('token_id')->whereIn('token_id', array_keys($rows))->where('project_id !=', $pid)->get()->getResultArray() as $c) {
+                foreach ($this->db->table('api_tokens')->select('token_id')->whereIn('token_id', array_keys($rows))->groupStart()->where('project_id !=', $pid)->orWhere('scope', 'send')->groupEnd()->get()->getResultArray() as $c) {
                     throw new ConfigException('TOKEN_CONFLICT', 'Token "' . $c['token_id'] . '" belongs to another project');
                 }
             }

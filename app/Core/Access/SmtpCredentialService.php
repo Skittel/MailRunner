@@ -17,6 +17,10 @@ use CodeIgniter\Database\BaseConnection;
  *
  * Rotation keeps the previous password valid for a grace period, so devices
  * can be switched over without an outage.
+ *
+ * Scope "send": the login of a send access (E-27), created by SendAccessService in the same table, so a username is
+ * unique on the node across both roles. Send logins are not listed by the receive API and never reach the receive
+ * mail path.
  */
 class SmtpCredentialService
 {
@@ -54,32 +58,62 @@ class SmtpCredentialService
             if ($project['profile'] !== 'checked_auth') {
                 throw new ConfigException('PROFILE_NO_SMTP_AUTH', 'Project "' . $ref . '" has profile "' . $project['profile'] . '"; SMTP credentials need profile checked_auth');
             }
-            // a revoked credential frees its username (its history stays in the journal)
-            $this->db->table('smtp_credentials')->where('username', $username)->where('revoked_at IS NOT NULL')->delete();
-            if ($this->db->table('smtp_credentials')->where('username', $username)->countAllResults() > 0) {
-                throw new ConfigException('USERNAME_EXISTS', 'SMTP username "' . $username . '" already exists on this node');
-            }
-            $credentialId = RandomId::publicId(self::ID_PREFIX);
-            $now          = Time::now();
-            $this->db->table('smtp_credentials')->insert([
-                'credential_id'    => $credentialId,
-                'project_id'       => $project['id'],
-                'username'         => $username,
-                'label'            => mb_substr($label, 0, 100),
-                'password_hash'    => password_hash($password, PASSWORD_ARGON2ID),
-                'tls_required'     => $tlsRequired ? 1 : 0,
-                'allowed_networks' => $networks === null ? null : json_encode($networks),
-                'enabled'          => 1,
-                'created_at'       => $now,
-                'updated_at'       => $now,
-            ]);
-            $revision = $this->projects->bumpRevision((int) $project['id']);
-            $this->journal->append('credential.created', $ctx, (int) $project['customer_id'], (int) $project['id'], [
-                'credential_id' => $credentialId, 'username' => $username, 'tls_required' => $tlsRequired, 'revision' => $revision,
-            ]);
 
-            return ['credential' => $this->get($credentialId), 'password' => $password];
+            return $this->insert($project, $username, $label, $password, $tlsRequired, $networks, 'receive', $ctx);
         });
+    }
+
+    /**
+     * Creates the login of a send access (scope send; the caller holds the project lock).
+     *
+     * @param array<string, mixed> $project
+     * @param list<string>|null    $allowedNetworks
+     *
+     * @return array{credential: array<string, mixed>, password: string}
+     */
+    public function createSend(array $project, string $username, string $label, ?string $password, bool $tlsRequired, ?array $allowedNetworks, ChangeContext $ctx): array
+    {
+        $username = self::normalizeUsername($username);
+        $password ??= RandomId::password();
+        self::assertPasswordStrength($password);
+
+        return $this->insert($project, $username, trim($label) !== '' ? trim($label) : $username, $password, $tlsRequired, self::normalizeNetworks($allowedNetworks), 'send', $ctx);
+    }
+
+    /**
+     * @param array<string, mixed> $project
+     * @param list<string>|null    $networks
+     *
+     * @return array{credential: array<string, mixed>, password: string}
+     */
+    private function insert(array $project, string $username, string $label, string $password, bool $tlsRequired, ?array $networks, string $scope, ChangeContext $ctx): array
+    {
+        // a revoked credential frees its username (its history stays in the journal)
+        $this->db->table('smtp_credentials')->where('username', $username)->where('revoked_at IS NOT NULL')->delete();
+        if ($this->db->table('smtp_credentials')->where('username', $username)->countAllResults() > 0) {
+            throw new ConfigException('USERNAME_EXISTS', 'SMTP username "' . $username . '" already exists on this node');
+        }
+        $credentialId = RandomId::publicId(self::ID_PREFIX);
+        $now          = Time::now();
+        $this->db->table('smtp_credentials')->insert([
+            'credential_id'    => $credentialId,
+            'project_id'       => $project['id'],
+            'scope'            => $scope,
+            'username'         => $username,
+            'label'            => mb_substr($label, 0, 100),
+            'password_hash'    => password_hash($password, PASSWORD_ARGON2ID),
+            'tls_required'     => $tlsRequired ? 1 : 0,
+            'allowed_networks' => $networks === null ? null : json_encode($networks),
+            'enabled'          => 1,
+            'created_at'       => $now,
+            'updated_at'       => $now,
+        ]);
+        $revision = $this->projects->bumpRevision((int) $project['id']);
+        $this->journal->append('credential.created', $ctx, (int) $project['customer_id'], (int) $project['id'], [
+            'credential_id' => $credentialId, 'username' => $username, 'tls_required' => $tlsRequired, 'revision' => $revision,
+        ] + ($scope === 'send' ? ['scope' => 'send'] : []));
+
+        return ['credential' => $this->get($credentialId), 'password' => $password];
     }
 
     /**
@@ -189,7 +223,7 @@ class SmtpCredentialService
 
         return $this->db->table('smtp_credentials')
             ->select('credential_id, username, label, tls_required, allowed_networks, enabled, password_change_required, previous_valid_until, created_at, revoked_at, last_used_at')
-            ->where('project_id', $project['id'])->orderBy('id')->get()->getResultArray();
+            ->where('project_id', $project['id'])->where('scope', 'receive')->orderBy('id')->get()->getResultArray();
     }
 
     /**

@@ -2,6 +2,25 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
+## 0.2.1 - 2026-11-08
+Send role, step 2 of 7 (decision E-27): send profiles and accesses. Nothing is sent yet.
+- Customer API `GET /v1/send-profiles`, `GET|PUT|DELETE /v1/send-profiles/{name}`: a profile is defined
+  completely with one idempotent PUT (`changed: false` if equal): allowed senders (domains or addresses, mandatory),
+  optional recipients, limits per hour and day (mandatory, at most the project limits; a project without limits
+  cannot have profiles), retries (`default` = 16 attempts in 8 h, or 5-32 attempts within 10 min-48 h, shown as
+  `schedule_minutes`), return-path domain, test interval (1-168 h). Deleting a profile revokes its accesses.
+- Accesses per profile, mixed: `POST /v1/send-profiles/{name}/accesses`, `PATCH|DELETE /v1/send-accesses/{id}`,
+  `POST /v1/send-accesses/{id}/rotate`.
+  - `api`: token with scope `send`; it may only submit mail (and read `/v1/node/status`), all other endpoints
+    answer 403 `TOKEN_SCOPE`; a disabled access or profile answers 403 `ACCESS_DISABLED`. Send tokens are local:
+    not listed for MailRunner Admin and never revoked by the central token sync.
+  - `smtp`: login in the same table as the receive logins (username unique on the node across both roles), scope
+    `send`; not listed by `/v1/smtp-credentials` and not given to `mr-auth` yet (submission is step 3).
+  - `ip`: client networks up to IPv4 /29 and IPv6 /64, no loopback/multicast/link-local, never overlapping an ip
+    access of any project on the node.
+- Journal `send.profile.updated|deleted`, `send.access.created|updated|rotated|revoked` (never secrets).
+- Admin API project view and `mr:project:show` list profiles and accesses of send projects.
+
 ## 0.2.0 - 2026-11-06
 Send role, step 1 of 7 (decision E-27). Nothing is sent yet.
 - Project type `receive` | `send`, fixed at creation (`mr:project:create --type=send`, admin API `type`, refused

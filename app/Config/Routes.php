@@ -35,6 +35,15 @@ $routes->group('v1', ['filter' => 'bearer'], static function (RouteCollection $r
         $routes->put('domains/(:segment)', '\App\Controllers\V1\SendDomains::put/$1');
         $routes->delete('domains/(:segment)', '\App\Controllers\V1\SendDomains::delete/$1');
         $routes->post('dkim/generate', '\App\Controllers\V1\SendDomains::generate');
+        $routes->get('send-profiles', '\App\Controllers\V1\SendProfiles::index');
+        $routes->get('send-profiles/(:segment)', '\App\Controllers\V1\SendProfiles::show/$1');
+        $routes->put('send-profiles/(:segment)', '\App\Controllers\V1\SendProfiles::put/$1');
+        $routes->delete('send-profiles/(:segment)', '\App\Controllers\V1\SendProfiles::delete/$1');
+        $routes->get('send-profiles/(:segment)/accesses', '\App\Controllers\V1\SendProfiles::accesses/$1');
+        $routes->post('send-profiles/(:segment)/accesses', '\App\Controllers\V1\SendProfiles::createAccess/$1');
+        $routes->patch('send-accesses/(:segment)', '\App\Controllers\V1\SendProfiles::updateAccess/$1');
+        $routes->post('send-accesses/(:segment)/rotate', '\App\Controllers\V1\SendProfiles::rotateAccess/$1');
+        $routes->delete('send-accesses/(:segment)', '\App\Controllers\V1\SendProfiles::deleteAccess/$1');
     }
 });
 

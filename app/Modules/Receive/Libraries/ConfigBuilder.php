@@ -101,7 +101,7 @@ class ConfigBuilder
         $rows = $this->db->query(
             'SELECT s.*, p.project_key, p.profile, c.customer_key FROM smtp_credentials s
              JOIN projects p ON p.id = s.project_id JOIN customers c ON c.id = p.customer_id
-             WHERE s.enabled = 1 AND s.revoked_at IS NULL AND p.type = \'receive\' AND p.enabled = 1 AND c.enabled = 1 ORDER BY s.username',
+             WHERE s.enabled = 1 AND s.revoked_at IS NULL AND s.scope = \'receive\' AND p.type = \'receive\' AND p.enabled = 1 AND c.enabled = 1 ORDER BY s.username',
         )->getResultArray();
         $out = [];
         foreach ($rows as $r) {

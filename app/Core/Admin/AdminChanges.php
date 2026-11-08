@@ -168,7 +168,7 @@ class AdminChanges
         $p    = service('projectService')->find($ref);
         $have = [];
         if ($p !== null) {
-            foreach (db_connect()->table('api_tokens')->select('token_id, label, expires_at, revoked_at')->where('project_id', $p['id'])->get()->getResultArray() as $t) {
+            foreach (db_connect()->table('api_tokens')->select('token_id, label, expires_at, revoked_at')->where('project_id', $p['id'])->where('scope', 'manage')->get()->getResultArray() as $t) {
                 $have[$t['token_id']] = $t;
             }
         }

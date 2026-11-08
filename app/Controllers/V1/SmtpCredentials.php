@@ -119,7 +119,7 @@ class SmtpCredentials extends BaseController
             throw new ConfigException('CREDENTIAL_NOT_FOUND', 'SMTP credential "' . $id . '" not found');
         }
         $c = service('smtpCredentialService')->get($id);
-        if ((int) $c['project_id'] !== CurrentToken::projectId() || $c['revoked_at'] !== null) {
+        if ((int) $c['project_id'] !== CurrentToken::projectId() || $c['revoked_at'] !== null || $c['scope'] !== 'receive') {
             throw new ConfigException('CREDENTIAL_NOT_FOUND', 'SMTP credential "' . $id . '" not found');
         }
 

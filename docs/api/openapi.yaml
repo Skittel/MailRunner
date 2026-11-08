@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MailRunner customer API (receive, send)
-  version: 0.2.0
+  version: 0.2.1
   description: |
     Pull API of a MailRunner node. A client application collects the messages the node accepted
     for its project. A token belongs to exactly one project and only sees that project's data.
@@ -424,6 +424,158 @@ paths:
                           dns: { $ref: '#/components/schemas/DkimDnsRecord' }
         '409': { $ref: '#/components/responses/ProjectType' }
         '422': { description: 'INVALID_DOMAIN, INVALID_DKIM_KEY (unknown algorithm or bits)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/send-profiles:
+    get:
+      summary: Send profiles of the project
+      description: Send projects only. Every profile with its access counts and the limits that apply after the project limits.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/SendProfile' } }
+        '409': { $ref: '#/components/responses/ProjectType' }
+  /v1/send-profiles/{name}:
+    parameters:
+      - { name: name, in: path, required: true, schema: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,62}$' } }
+    get:
+      summary: One send profile
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/SendProfile' } } } ] } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      summary: Create or replace a send profile (idempotent)
+      description: |
+        The complete definition; omitted optional fields get their defaults. The same definition again changes
+        nothing (`changed: false`). Senders must be allowed for the project and the limits must not exceed the
+        project limits; a project without limits (set in MailRunner Admin) cannot have profiles.
+        Retries: `"default"` = 16 attempts within 480 minutes. The node plans them itself: the first retry after
+        one minute, the gaps grow by a fixed factor, the last attempt is at `max_minutes` (`schedule_minutes`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [senders, limit_hour, limit_day]
+              properties:
+                senders: { type: array, items: { type: string }, minItems: 1, maxItems: 100, description: 'domains (subdomains not included) or addresses', example: [shop.example, info@news.shop.example] }
+                recipients: { type: array, nullable: true, items: { type: string }, maxItems: 100, description: 'allowed recipient domains or addresses; null = all' }
+                limit_hour: { type: integer, minimum: 1 }
+                limit_day: { type: integer, minimum: 1 }
+                retry:
+                  oneOf:
+                    - { type: string, enum: [default] }
+                    - { type: object, required: [attempts, max_minutes], properties: { attempts: { type: integer, minimum: 5, maximum: 32 }, max_minutes: { type: integer, minimum: 10, maximum: 2880 } } }
+                return_path_domain: { type: string, nullable: true, description: 'bounce domain (used from the bounce step on)' }
+                test_interval_hours: { type: integer, minimum: 1, maximum: 168, default: 24 }
+                label: { type: string, maxLength: 100 }
+                enabled: { type: boolean, default: true }
+      responses:
+        '200': { description: 'Replaced or unchanged (see changed)', content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/SendProfile' }, changed: { type: boolean } } } ] } } } }
+        '201': { description: Created }
+        '403': { description: 'DOMAIN_NOT_ALLOWED, LIMIT_EXCEEDS_PROJECT, PROJECT_LIMIT_MISSING', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { $ref: '#/components/responses/ProjectType' }
+        '422': { description: 'INVALID_PROFILE, INVALID_PROFILE_NAME, TOO_MANY_PROFILES', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      summary: Delete a send profile and revoke all its accesses
+      responses:
+        '200': { description: 'deleted: false if it did not exist', content: { application/json: { schema: { type: object, properties: { deleted: { type: boolean } } } } } }
+  /v1/send-profiles/{name}/accesses:
+    parameters:
+      - { name: name, in: path, required: true, schema: { type: string } }
+    get:
+      summary: Accesses of a send profile
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/SendAccess' } } } } ] } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      summary: Add an access (api, smtp or ip)
+      description: |
+        `api`: a token that can only submit mail (and read `/v1/node/status`), returned once as `bearer`.
+        `smtp`: a login for ports 25/587/465; the username is unique on the node across send and receive logins.
+        A generated password is returned once; a password set by the application is never returned.
+        `ip`: client networks that may relay without login, IPv4 up to /29 and IPv6 up to /64, public or private
+        unicast, never overlapping an ip access of any project on the node.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type]
+              properties:
+                type: { type: string, enum: [api, smtp, ip] }
+                label: { type: string, maxLength: 100 }
+                expires_in: { type: integer, minimum: 60, nullable: true, description: 'api: seconds' }
+                username: { type: string, description: 'smtp' }
+                password: { type: string, minLength: 16, maxLength: 128, description: 'smtp: optional, otherwise generated' }
+                plaintext_port25: { type: boolean, default: false, description: 'smtp: allow AUTH without TLS on port 25' }
+                allowed_networks: { type: array, items: { type: string }, nullable: true, description: 'smtp: login only from these networks' }
+                networks: { type: array, items: { type: string }, minItems: 1, maxItems: 16, description: 'ip', example: ['203.0.113.8/29', '2001:db8:1::/64'] }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/SendAccess' }
+                      bearer: { type: string, description: 'api: shown only now' }
+                      password: { type: string, description: 'smtp with generated password: shown only now' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'USERNAME_EXISTS, NETWORK_IN_USE, PROJECT_TYPE', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: 'INVALID_ACCESS, INVALID_NETWORK, INVALID_USERNAME, WEAK_PASSWORD, TOO_MANY_ACCESSES', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/send-accesses/{access_id}:
+    parameters:
+      - { name: access_id, in: path, required: true, schema: { type: string, example: mra_7hq2m0x4k9d3a1b5 } }
+    patch:
+      summary: Change an access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: { type: string }
+                enabled: { type: boolean }
+                networks: { type: array, items: { type: string }, description: 'ip only' }
+                plaintext_port25: { type: boolean, description: 'smtp only' }
+                allowed_networks: { type: array, items: { type: string }, nullable: true, description: 'smtp only' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/Envelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/SendAccess' } } } ] } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Revoke an access at once (token or login stops working)
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { revoked: { type: string } } } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/send-accesses/{access_id}/rotate:
+    parameters:
+      - { name: access_id, in: path, required: true, schema: { type: string } }
+    post:
+      summary: New secret for an api or smtp access
+      description: 'api: a new token; the old one stays valid for grace_seconds. smtp: a new password (generated unless given); the old one stays valid for grace_seconds.'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                grace_seconds: { type: integer, minimum: 0, maximum: 604800, default: 0 }
+                password: { type: string, description: 'smtp only' }
+      responses:
+        '200': { description: 'bearer (api) or password (smtp, generated) shown only now' }
+        '422': { description: 'INVALID_ACCESS (ip accesses have no secret)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /v1/journal:
     get:
       summary: Events of the project, oldest first
@@ -570,6 +722,50 @@ components:
             key_sha256: { type: string, description: 'SHA-256 of the public key; compare it across nodes' }
         dns: { $ref: '#/components/schemas/DkimDnsRecord' }
         allowed: { type: [boolean, 'null'], description: 'false if the operator no longer allows the domain for the project' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    SendProfile:
+      type: object
+      properties:
+        profile_id: { type: string, example: mrp_k3f9x2m7q1w8e4r6 }
+        name: { type: string }
+        label: { type: string }
+        enabled: { type: boolean }
+        senders: { type: array, items: { type: string } }
+        recipients: { type: array, nullable: true, items: { type: string } }
+        limit_hour: { type: integer }
+        limit_day: { type: integer }
+        effective_limit_hour: { type: integer, description: 'lower of profile and project limit' }
+        effective_limit_day: { type: integer }
+        senders_not_allowed: { type: array, items: { type: string }, description: 'senders the project no longer allows (nothing is sent from them)' }
+        retry:
+          type: object
+          properties:
+            attempts: { type: integer }
+            max_minutes: { type: integer }
+            schedule_minutes: { type: array, items: { type: number }, description: 'retry times after the first attempt' }
+        return_path_domain: { type: string, nullable: true }
+        test_interval_hours: { type: integer }
+        accesses: { type: object, properties: { api: { type: integer }, smtp: { type: integer }, ip: { type: integer } } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    SendAccess:
+      type: object
+      properties:
+        access_id: { type: string, example: mra_7hq2m0x4k9d3a1b5 }
+        profile: { type: string }
+        type: { type: string, enum: [api, smtp, ip] }
+        label: { type: string }
+        enabled: { type: boolean }
+        token_id: { type: string, description: api }
+        expires_at: { type: string, format: date-time, nullable: true, description: api }
+        previous_token_valid_until: { type: string, format: date-time, nullable: true, description: 'api, during a rotation' }
+        username: { type: string, description: smtp }
+        plaintext_port25: { type: boolean, description: smtp }
+        allowed_networks: { type: array, nullable: true, items: { type: string }, description: smtp }
+        previous_password_valid_until: { type: string, format: date-time, nullable: true, description: 'smtp, during a rotation' }
+        last_used_at: { type: string, format: date-time, nullable: true, description: 'api, smtp' }
+        networks: { type: array, items: { type: string }, description: ip }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     Webhook:

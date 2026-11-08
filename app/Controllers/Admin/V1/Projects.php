@@ -35,18 +35,37 @@ class Projects extends AdminController
         return ApiResponse::ok(['data' => array_map(static fn ($p) => self::present($p, $routes[(int) $p['id']] ?? []), service('projectService')->list())]);
     }
 
+    /**
+     * Send profiles with their accesses (no secrets, no hashes) for the admin view.
+     *
+     * @param array<string, mixed> $p
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function sendProfiles(array $p): array
+    {
+        $out = [];
+        foreach (service('sendProfileService')->list((int) $p['id']) as $row) {
+            $out[] = \App\Core\Send\SendProfileService::present($row, $p)
+                + ['access_list' => array_map([\App\Core\Send\SendAccessService::class, 'present'], service('sendAccessService')->list((int) $row['id']))];
+        }
+
+        return $out;
+    }
+
     public function show(string $customer, string $project)
     {
         return $this->guard(function () use ($customer, $project) {
             $ref = $customer . '/' . $project;
             $p   = service('projectService')->get($ref);
 
-            $hashes  = array_column(db_connect()->table('api_tokens')->select('token_id, secret_hash')->where('project_id', $p['id'])->get()->getResultArray(), 'secret_hash', 'token_id');
+            $hashes  = array_column(db_connect()->table('api_tokens')->select('token_id, secret_hash')->where('project_id', $p['id'])->where('scope', 'manage')->get()->getResultArray(), 'secret_hash', 'token_id');
             $unacked = db_connect()->table('receive_messages')->where('project_id', $p['id'])->where('acked_at', null)->where('content_deleted_at', null)->countAllResults();
 
             return ApiResponse::ok(['data' => self::present($p, array_column(service('routeService')->list($ref), 'route')) + [
                 'messages_unacked' => $unacked,
                 'domains' => $p['type'] === 'send' ? array_map(static fn ($d) => \App\Core\Send\SendDomainService::present($d, $p), service('sendDomainService')->list((int) $p['id'])) : null,
+                'send_profiles' => $p['type'] === 'send' ? self::sendProfiles($p) : null,
                 'tokens_central' => (int) ($p['tokens_central'] ?? 0) === 1,
                 'webhook' => \App\Core\Webhooks\WebhookService::present(service('webhookService')->get((int) $p['id'])), // set by the customer (PUT /v1/webhook)
                 'tokens' => array_map(static fn ($t) => [
