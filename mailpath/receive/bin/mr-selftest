@@ -2,7 +2,7 @@
 """mr-selftest - self test of a receive node (decision E-17), started by `spark mr:selftest`.
 
   mr-selftest --hostname=<mx name> [--journal-after=<journal id>] [--base-only] [--mx-names="a=46 b=4"]
-              [--send-helo=<name> --send-ips=<ip,ip>]   (send role on)
+              [--send-helo=<name> --send-ips=<ip,ip> [--bounce-source=<url>]]   (send role on)
 
 Prints the result as JSON on stdout. Exit code 0 = pass, 1 = at least one check failed, 2 = self test broken.
 """
@@ -23,7 +23,8 @@ def main():
         analyzer.use_node_resolver()
         send = None
         if "send-helo" in args or "send-ips" in args:
-            send = {"helo": args.get("send-helo", "").strip().lower(), "ips": [i for i in args.get("send-ips", "").split(",") if i]}
+            send = {"helo": args.get("send-helo", "").strip().lower(), "ips": [i for i in args.get("send-ips", "").split(",") if i],
+                    "bounce_source": args.get("bounce-source", "").strip()}
         result = selftest.run_all(args["hostname"], int(args.get("journal-after", "0")), "base-only" in args, args.get("mx-names", ""), send)
     except Exception as e:
         import traceback

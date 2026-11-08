@@ -56,5 +56,15 @@ class SendChecksTest(unittest.TestCase):
         self.assertEqual("fail", checks["send.v4.1.port25"]["status"])
 
 
+class BounceCheckTest(unittest.TestCase):
+    def test_bounce_source(self):
+        from mailrunner_rx import selftest
+        for token, fetch, status in (("", None, "fail"), ("t", lambda src, tok: 200, "ok"), ("t", lambda src, tok: 401, "fail")):
+            run = selftest.Run("node.example")
+            selftest.bounce_check(run, "https://rx.example/v1", token=token, fetch=fetch)
+            checks = {c["name"]: c for c in run.result()["checks"]}
+            self.assertEqual(status, checks["send.bounces"]["status"])
+
+
 if __name__ == "__main__":
     unittest.main()

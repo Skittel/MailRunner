@@ -97,6 +97,7 @@ class SendProfileService
         return Transaction::run($this->db, function () use ($projectId, $name, $want, $ctx): array {
             $project = $this->domains->sendProject($projectId);
             $this->assertWithinProject($project, $want);
+            $this->assertReturnPath($projectId, $name, $want);
             $old = $this->find($projectId, $name);
             $row = ['senders' => json_encode($want['senders']), 'recipients' => $want['recipients'] === null ? null : json_encode($want['recipients'])] + $want;
             if ($old !== null && self::same($old, $row)) {
@@ -113,6 +114,12 @@ class SendProfileService
                 $this->db->table('send_profiles')->where('id', $old['id'])->update($row + ['updated_at' => $now, 'updated_by' => $ctx->actor]);
             }
             $new = $this->get($projectId, $name);
+            if ($old === null || $old['return_path_domain'] !== $want['return_path_domain']) {
+                // the domain test covers the return-path domain (SPF): test the sender domains again
+                $domains = array_values(array_unique(array_map([self::class, 'domainOf'], $want['senders'])));
+                $this->db->table('send_domains')->where('project_id', $projectId)->whereIn('domain', $domains)->where('test_requested_at', null)
+                    ->update(['test_requested_at' => $now]);
+            }
             $this->journal->append('send.profile.updated', $ctx, (int) $project['customer_id'], $projectId, [
                 'profile_id' => $new['profile_id'], 'name' => $name, 'created' => $old === null,
                 'changed' => $old === null ? null : array_keys(array_diff_assoc(array_map('strval', array_intersect_key($row, $old)), array_map('strval', array_intersect_key($old, $row)))),
@@ -227,6 +234,27 @@ class SendProfileService
         $bad = array_values(array_filter($want['senders'], static fn ($s) => ! ProjectService::sendDomainAllowed($project, self::domainOf($s))));
         if ($bad !== []) {
             throw new ConfigException('DOMAIN_NOT_ALLOWED', 'Sender(s) not allowed for this project: ' . implode(', ', $bad));
+        }
+    }
+
+    /**
+     * One return-path domain per sender domain in a project: the domain test is made with it (SPF of the bounce
+     * domain), so two profiles sending from the same domain must agree.
+     *
+     * @param array<string, mixed> $want
+     */
+    private function assertReturnPath(int $projectId, string $name, array $want): void
+    {
+        $mine = array_unique(array_map([self::class, 'domainOf'], $want['senders']));
+        foreach ($this->list($projectId) as $p) {
+            if ($p['name'] === $name || $p['return_path_domain'] === $want['return_path_domain']) {
+                continue;
+            }
+            $shared = array_intersect($mine, array_map([self::class, 'domainOf'], json_decode($p['senders'], true)));
+            if ($shared !== []) {
+                throw new ConfigException('RETURN_PATH_CONFLICT', 'Profile "' . $p['name'] . '" sends from ' . implode(', ', $shared) . ' with return_path_domain '
+                    . ($p['return_path_domain'] ?? 'null') . '; all profiles of a sender domain need the same return_path_domain');
+            }
         }
     }
 

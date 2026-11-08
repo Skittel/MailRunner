@@ -47,6 +47,12 @@ class Mailrunner extends BaseConfig
     public array $sendIpv6 = [];
 
     /**
+     * Send role, bounces (E-27 step 6): receive API of the bounce project, e.g. "https://<receive node>/v1". The token
+     * is BOUNCE_SOURCE_TOKEN in secrets.env. Empty: this node collects no bounces.
+     */
+    public string $bounceSource = '';
+
+    /**
      * What MailRunner Admin may do on this node (app.env), each "auto" (default) or "manual":
      *   adminUpdates  auto: a software update requested by the admin is installed at once (mailrunner-update unit);
      *                 manual: it is only noted, install with "sudo mailrunner mr:update".
@@ -84,6 +90,7 @@ class Mailrunner extends BaseConfig
         $this->sendHelo        = strtolower(trim((string) (env('MAILRUNNER_SEND_HELO') ?? $this->sendHelo)));
         $this->sendIpv4        = self::ipList(env('MAILRUNNER_SEND_IPV4'), FILTER_FLAG_IPV4) ?? $this->sendIpv4;
         $this->sendIpv6        = self::ipList(env('MAILRUNNER_SEND_IPV6'), FILTER_FLAG_IPV6) ?? $this->sendIpv6;
+        $this->bounceSource    = trim((string) (env('MAILRUNNER_BOUNCE_SOURCE') ?? $this->bounceSource));
         $this->adminUpdates    = env('MAILRUNNER_ADMIN_UPDATES') === 'manual' ? 'manual' : 'auto';
         $this->adminConfig     = env('MAILRUNNER_ADMIN_CONFIG') === 'manual' ? 'manual' : 'auto';
         $this->sourceDir       = rtrim((string) (env('MAILRUNNER_SOURCE_DIR') ?? $this->sourceDir), '/');

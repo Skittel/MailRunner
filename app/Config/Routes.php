@@ -55,6 +55,12 @@ $routes->group('v1', ['filter' => 'bearer'], static function (RouteCollection $r
     }
 });
 
+// Send role: ping from the receive node of the bounce domain (its webhook) -> mr-sender collects bounces now. No
+// token: the ping carries no data and only brings the next collection forward (it runs every minute anyway).
+if (config('Mailrunner')->sendEnabled) {
+    $routes->post('hooks/bounces', '\App\Controllers\Hooks::bounces');
+}
+
 // Node admin API (decision E-19): mTLS with the MailRunner Admin CA, used by the admin GUI.
 $routes->group('admin/v1', ['filter' => 'admincert'], static function (RouteCollection $routes): void {
     $routes->get('node', '\App\Controllers\Admin\V1\Node::show');

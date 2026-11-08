@@ -28,7 +28,7 @@ class SelfTestCommand extends MrCommand
         $selftest = new SelfTest(db_connect(), service('journalWriter'), ROOTPATH . 'mailpath/receive/bin/mr-selftest', $config->dataDir . '/selftest',
             SecretScan::forNode(db_connect()));
         $result   = $selftest->run($hostname, $this->option('base-only') !== null, $config->mxNames,
-            $config->sendEnabled ? ['helo' => $config->sendHelo, 'ips' => [...$config->sendIpv4, ...$config->sendIpv6]] : null);
+            $config->sendEnabled ? ['helo' => $config->sendHelo, 'ips' => [...$config->sendIpv4, ...$config->sendIpv6], 'bounce_source' => $config->bounceSource] : null);
 
         if ($this->json()) {
             $this->outputJson($result);

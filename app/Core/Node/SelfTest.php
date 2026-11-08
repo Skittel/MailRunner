@@ -69,6 +69,9 @@ class SelfTest
         if ($send !== null) {
             $cmd[] = '--send-helo=' . ($send['helo'] ?? '');
             $cmd[] = '--send-ips=' . implode(',', $send['ips'] ?? []);
+            if (($send['bounce_source'] ?? '') !== '') {
+                $cmd[] = '--bounce-source=' . $send['bounce_source'];
+            }
         }
         $proc = proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
         if (! is_resource($proc)) {

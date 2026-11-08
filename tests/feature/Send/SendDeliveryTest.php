@@ -248,6 +248,44 @@ final class SendDeliveryTest extends CIUnitTestCase
         $this->assertSame(3, db_connect()->table('send_domain_tests')->countAllResults() - 1, 'every run is kept (passed, unavailable, key_changed, failed)');
     }
 
+    public function testReturnPathDomainBouncesAndTheBounceHook(): void
+    {
+        $this->passTest();
+        // the bounce domain changes the profile: the domain test must be made again with it (SPF of the bounce domain)
+        [$code, $p] = $this->api('PUT', 'send-profiles/shop', ['senders' => ['shop.example'], 'limit_hour' => 50, 'limit_day' => 500, 'return_path_domain' => 'Bounce.Example'], $this->manage);
+        $this->assertSame([200, 'bounce.example'], [$code, $p['data']['return_path_domain']]);
+        $this->assertNotNull(db_connect()->table('send_domains')->get()->getRow()->test_requested_at);
+        [$code, $res] = $this->api('PUT', 'send-profiles/other', ['senders' => ['info@shop.example'], 'limit_hour' => 5, 'limit_day' => 5], $this->manage);
+        $this->assertSame([422, 'RETURN_PATH_CONFLICT'], [$code, $res['error']['code']], 'one return-path domain per sender domain');
+
+        [, $s] = $this->api('POST', 'send', ['from' => 'info@shop.example', 'to' => ['a@example.net'], 'subject' => 'x', 'text' => 'x']);
+        $this->assertSame('bounce.example', db_connect()->table('send_submissions')->get()->getRow()->return_path_domain);
+        [$c] = $this->worker([['claim' => 10]]);
+        $this->assertSame([], $c['claimed'], 'the passed test was made without the bounce domain');
+        $this->assertSame('waiting_test', $this->messages()['a@example.net']['status']);
+        db_connect()->table('send_domains')->update(['test_return_path_domain' => 'bounce.example']);
+        db_connect()->table('send_messages')->update(['next_attempt_at' => Time::now()]);
+
+        // delivered, then a DSN reports a permanent failure: bounced (once), with the report as an attempt
+        [$c, $r, $b, $b2] = $this->worker([['claim' => 10], ['record' => ['a@example.net' => 'sent']], ['bounce' => ['a@example.net' => '5.1.1']], ['bounce' => ['a@example.net' => '5.1.1']]]);
+        $this->assertSame(['a@example.net'], $c['claimed']);
+        $this->assertSame([['a@example.net' => true], 1], [$b['bounced'], $b['pings']]);
+        $this->assertSame(['a@example.net' => false], $b2['bounced'], 'idempotent');
+        $m = $this->messages()['a@example.net'];
+        $this->assertSame(['bounced', 'bounce_report', '5.1.1'], [$m['status'], $m['status_reason'], $m['last_enhanced']]);
+        [, $d] = $this->api('GET', 'send/messages/' . $m['message_id']);
+        $this->assertSame(['connect', 'data', 'bounce'], array_column($d['data']['delivery_attempts'], 'stage'));
+
+        // ping from the bounce receive node
+        $dir = sys_get_temp_dir() . '/mr-hook-' . bin2hex(random_bytes(3));
+        mkdir($dir . '/send/requests', 0o770, true);
+        config('Mailrunner')->dataDir = $dir;
+        $res = $this->call('POST', 'hooks/bounces');
+        $this->assertSame(204, $res->response()->getStatusCode());
+        $this->assertFileExists($dir . '/send/requests/bounce.request');
+        exec('rm -rf ' . escapeshellarg($dir));
+    }
+
     public function testRetentionDeletesTheMailWhenEveryRecipientIsFinal(): void
     {
         $this->passTest();

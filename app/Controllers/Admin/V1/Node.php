@@ -44,7 +44,7 @@ class Node extends AdminController
             'send'     => ['enabled' => config('Mailrunner')->sendEnabled, 'helo' => config('Mailrunner')->sendHelo ?: null,
                 'ipv4' => config('Mailrunner')->sendIpv4, 'ipv6' => config('Mailrunner')->sendIpv6,
                 'projects' => $db->table('projects')->where('type', 'send')->countAllResults(), 'domains' => $db->table('send_domains')->countAllResults(),
-                'queue' => self::sendQueue($db)],
+                'queue' => self::sendQueue($db), 'bounces' => self::bounceState($db)],
             'policy'   => ['updates' => config('Mailrunner')->adminUpdates, 'config' => config('Mailrunner')->adminConfig],
             'pending_changes' => (new PendingChanges())->count(),
             'update_requested' => Updater::forNode()->requested()['version'] ?? null,
@@ -54,6 +54,22 @@ class Node extends AdminController
     }
 
     /** Last update attempt (node.updated / node.update_failed / node.update_refused) or null. */
+    /**
+     * Where this node collects its bounces from and how the last run went (E-27 step 6).
+     *
+     * @return array<string, mixed>|null
+     */
+    private static function bounceState(\CodeIgniter\Database\BaseConnection $db): ?array
+    {
+        $source = config('Mailrunner')->bounceSource;
+        if ($source === '') {
+            return null;
+        }
+        $row = $db->table('send_bounce_state')->where('source', $source)->get()->getRowArray();
+
+        return ['source_host' => parse_url($source, PHP_URL_HOST) ?: null, 'checked_at' => Time::toIso($row['checked_at'] ?? null), 'last_error' => $row['last_error'] ?? null];
+    }
+
     /**
      * Send queue figures: messages per open status, finished in the last 24 h, the oldest waiting message.
      *

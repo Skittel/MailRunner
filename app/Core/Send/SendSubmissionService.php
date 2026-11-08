@@ -51,7 +51,7 @@ class SendSubmissionService
     {
         return $this->db->query(
             'SELECT a.access_id, a.type, a.enabled AS access_enabled, a.project_id, p.id AS profile_row_id, p.name AS profile_name, p.enabled AS profile_enabled,
-                    p.senders, p.recipients, p.limit_hour, p.limit_day, p.retry_attempts, p.retry_seconds
+                    p.senders, p.recipients, p.limit_hour, p.limit_day, p.retry_attempts, p.retry_seconds, p.return_path_domain
              FROM send_accesses a JOIN send_profiles p ON p.id = a.profile_id WHERE a.access_id = ?',
             [$accessId],
         )->getRowArray();
@@ -151,7 +151,7 @@ class SendSubmissionService
                     'submission_id' => $submissionId, 'project_id' => $project['id'], 'profile_id' => $access['profile_row_id'],
                     'profile_name' => $access['profile_name'], 'access_id' => $access['access_id'], 'via' => $meta['via'],
                     'smtp_service' => $meta['smtp_service'] ?? null, 'client_ip' => $meta['client_ip'] ?? null,
-                    'envelope_from' => $env, 'header_from' => $from, 'from_domain' => $fromDomain,
+                    'envelope_from' => $env, 'return_path_domain' => $access['return_path_domain'], 'header_from' => $from, 'from_domain' => $fromDomain,
                     'subject' => mb_substr(Mime::decodeHeader((string) Mime::header($prepared['fields'], 'subject')), 0, 998) ?: null,
                     'message_id_header' => mb_substr($prepared['message_id'], 0, 998),
                     'recipients' => count($rcpts), 'size' => strlen($prepared['raw']), 'sha256' => hash('sha256', $prepared['raw']),

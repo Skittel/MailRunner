@@ -24,6 +24,12 @@ def main():
         if "claim" in step:
             claimed, changed = q.claim(step["claim"])
             print(json.dumps({"claimed": sorted(m["recipient"] for m in claimed), "changed": sorted(changed), "pings": q.pending_pings}))
+        elif "bounce" in step:
+            out = {}
+            for m in claimed:
+                if m["recipient"] in step["bounce"]:
+                    out[m["recipient"]] = q.record_bounce(m["message_id"], {"status": step["bounce"][m["recipient"]], "code": 550, "diagnostic": "smtp; 550 5.1.1 User unknown"})
+            print(json.dumps({"bounced": out, "pings": q.pending_pings}))
         elif "due_tests" in step:
             tests = q.due_tests(step["due_tests"])
             print(json.dumps({"tests": [{"domain": r["domain"], "trigger": r["trigger"]} for r in tests]}))

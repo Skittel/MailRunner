@@ -4,6 +4,7 @@ import os
 import re
 
 APP_ENV = os.environ.get("MR_APP_ENV", "/etc/mailrunner/app.env")
+SECRETS_ENV = os.environ.get("MR_SECRETS_ENV", "/etc/mailrunner/secrets.env")
 
 
 def read_env(path):
@@ -37,8 +38,10 @@ def ip_list(value, version):
 
 
 class Settings:
-    def __init__(self, env=None):
-        env = read_env(APP_ENV) if env is None else env
+    def __init__(self, env=None, secrets=None):
+        if env is None:   # the node: both files; tests pass their own values
+            env, secrets = read_env(APP_ENV), read_env(SECRETS_ENV) if secrets is None else secrets
+        secrets = secrets or {}
         self.db = {
             "host": env.get("database.default.hostname", "localhost"),
             "user": env.get("database.default.username", ""),
@@ -50,6 +53,10 @@ class Settings:
         self.helo = (env.get("MAILRUNNER_SEND_HELO") or "").strip().lower()
         self.ipv4 = ip_list(env.get("MAILRUNNER_SEND_IPV4"), 4)
         self.ipv6 = ip_list(env.get("MAILRUNNER_SEND_IPV6"), 6)
+        self.node_id = (env.get("MAILRUNNER_NODE_ID") or "").strip().lower()
+        # bounces (step 6): receive API of the bounce project, e.g. https://<receive node>/v1, and its token (secrets.env)
+        self.bounce_source = (env.get("MAILRUNNER_BOUNCE_SOURCE") or "").strip()
+        self.bounce_token = (secrets.get("BOUNCE_SOURCE_TOKEN") or "").strip()
         self.config_dir = env.get("MAILRUNNER_CONFIG_DIR", "/etc/mailrunner").rstrip("/")
         self.data_dir = env.get("MAILRUNNER_DATA_DIR", "/var/lib/mailrunner").rstrip("/")
 
@@ -60,6 +67,10 @@ class Settings:
     @property
     def store_dir(self):
         return os.path.join(self.data_dir, "send", "store")
+
+    @property
+    def bounce_request(self):
+        return os.path.join(self.data_dir, "send", "requests", "bounce.request")
 
     @property
     def webhook_request(self):

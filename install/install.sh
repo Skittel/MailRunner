@@ -18,7 +18,7 @@ set -euo pipefail
 # systemd units (mailrunner-update) have no HOME; composer refuses to run without it
 export HOME="${HOME:-/root}" COMPOSER_HOME="${COMPOSER_HOME:-${HOME:-/root}/.config/composer}"
 
-ROLE=""; NODE_ID=""; HOST=""; DB_NAME="mailrunner"; MX_NAMES=""; SEND_HELO=""; SEND_IPV4=""; SEND_IPV6=""; SEND_SET=0; ADMIN_CA=""; LE_EMAIL=""; ADMIN_URL=""; ENROLL_TOKEN=""; SKIP_DNS=0
+ROLE=""; NODE_ID=""; HOST=""; DB_NAME="mailrunner"; MX_NAMES=""; SEND_HELO=""; SEND_IPV4=""; SEND_IPV6=""; SEND_SET=0; BOUNCE_SOURCE=""; BOUNCE_SET=0; ADMIN_CA=""; LE_EMAIL=""; ADMIN_URL=""; ENROLL_TOKEN=""; SKIP_DNS=0
 SOURCE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 for arg in "$@"; do
     case "$arg" in
@@ -35,6 +35,7 @@ for arg in "$@"; do
         --send-helo=*) SEND_HELO="${arg#*=}"; SEND_SET=1 ;;   # send role (E-27): HELO name of outgoing mail, enables send
         --send-ipv4=*) SEND_IPV4="${arg#*=}"; SEND_SET=1 ;;   # source IPv4 address(es) of outgoing mail, comma-separated
         --send-ipv6=*) SEND_IPV6="${arg#*=}"; SEND_SET=1 ;;   # source IPv6 address(es)
+        --bounce-source=*) BOUNCE_SOURCE="${arg#*=}"; BOUNCE_SET=1 ;;   # receive API of the bounce project (token: BOUNCE_SOURCE_TOKEN in secrets.env)
         --skip-dns-check) SKIP_DNS=1 ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
     esac
@@ -198,6 +199,12 @@ if [[ "$SEND_SET" == 1 ]]; then
         echo "MAILRUNNER_SEND_ENABLED = false" >> /etc/mailrunner/app.env   # --send-helo= (empty) switches it off
         log "send role disabled"
     fi
+fi
+if [[ "$BOUNCE_SET" == 1 ]]; then   # empty value removes it
+    [[ -z "$BOUNCE_SOURCE" || "$BOUNCE_SOURCE" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/v1$ ]] || die "--bounce-source: https://<receive node>/v1 expected"
+    sed -i '/^MAILRUNNER_BOUNCE_SOURCE = /d' /etc/mailrunner/app.env
+    [[ -n "$BOUNCE_SOURCE" ]] && echo "MAILRUNNER_BOUNCE_SOURCE = \"$BOUNCE_SOURCE\"" >> /etc/mailrunner/app.env
+    log "bounce source ${BOUNCE_SOURCE:-removed} (token: BOUNCE_SOURCE_TOKEN in /etc/mailrunner/secrets.env)"
 fi
 
 if [[ ! -f /etc/mailrunner/secrets.env ]]; then

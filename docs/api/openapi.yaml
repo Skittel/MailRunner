@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MailRunner customer API (receive, send)
-  version: 0.2.5
+  version: 0.2.6
   description: |
     Pull API of a MailRunner node. A client application collects the messages the node accepted
     for its project. A token belongs to exactly one project and only sees that project's data.
@@ -618,7 +618,7 @@ paths:
                   oneOf:
                     - { type: string, enum: [default] }
                     - { type: object, required: [attempts, max_minutes], properties: { attempts: { type: integer, minimum: 5, maximum: 32 }, max_minutes: { type: integer, minimum: 10, maximum: 2880 } } }
-                return_path_domain: { type: string, nullable: true, description: 'bounce domain (used from the bounce step on)' }
+                return_path_domain: { type: string, nullable: true, description: 'bounce domain: Return-Path <message_id>-<node>-<check>@<domain>, bounces mark the message bounced; null = envelope sender of the submission. One return_path_domain per sender domain in a project (422 RETURN_PATH_CONFLICT); its SPF must allow every send node' }
                 test_interval_hours: { type: integer, minimum: 1, maximum: 168, default: 24 }
                 label: { type: string, maxLength: 100 }
                 enabled: { type: boolean, default: true }
@@ -880,6 +880,7 @@ components:
             requested: { type: boolean }
             running: { type: boolean }
             error: { type: string, nullable: true, description: 'the last run could not finish (e.g. SmartMailFlow unavailable); the previous result stays' }
+            return_path_domain: { type: string, nullable: true, description: 'return-path domain the test was made with (SPF); a profile with another one needs a new test' }
             details: { type: object, nullable: true, description: 'criteria, pre-check (SPF per family, DKIM record), checks per family (family, spf, dkim, dmarc, dmarc_policy, blacklist, tls), failed' }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
@@ -904,7 +905,7 @@ components:
         message_id: { type: string, example: mrm_7hq2m0x4k9d3a1b5 }
         recipient: { type: string }
         status: { type: string, enum: [queued, waiting_test, sending, deferred, sent, bounced, failed] }
-        status_reason: { type: string, nullable: true, description: 'e.g. domain_not_verified, dns_not_verified, temporary_rcpt, rejected_data, retries_exhausted, expired, project_disabled' }
+        status_reason: { type: string, nullable: true, description: 'e.g. domain_not_verified, dns_not_verified, temporary_rcpt, rejected_data, bounce_report, retries_exhausted, expired, project_disabled' }
         attempts: { type: integer, description: 'delivery attempts so far' }
         last_response: { type: object, nullable: true, properties: { code: { type: integer }, enhanced: { type: string }, message: { type: string } } }
         sent_at: { type: string, format: date-time, nullable: true }
@@ -923,7 +924,7 @@ components:
         local_ip: { type: string, nullable: true }
         mx_host: { type: string, nullable: true }
         mx_ip: { type: string, nullable: true }
-        stage: { type: string, enum: [dns, connect, greeting, ehlo, starttls, mail, rcpt, data, local] }
+        stage: { type: string, enum: [dns, connect, greeting, ehlo, starttls, mail, rcpt, data, local, bounce], description: 'bounce: a delivery status notification reported a permanent failure later' }
         result: { type: string, enum: [sent, deferred, bounced, failed] }
         smtp_code: { type: integer, nullable: true }
         enhanced_code: { type: string, nullable: true }

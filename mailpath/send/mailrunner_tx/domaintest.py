@@ -91,11 +91,12 @@ class DnsCheck:
             return []
 
 
-def precheck(domain, selector, public_key, ips, helo, dns_check, spf_check=None):
-    """{"spf": {ip_label: result}, "dkim": "pass"|"missing"|"mismatch"} or raises TemporaryDns."""
+def precheck(domain, selector, public_key, ips, helo, dns_check, spf_check=None, spf_domain=None):
+    """{"spf": {ip_label: result}, "dkim": "pass"|"missing"|"mismatch"} or raises TemporaryDns. SPF is checked for
+    spf_domain (the return-path domain of the profiles), else for the domain itself."""
     if spf_check is None:
         import spf
-        spf_check = lambda ip: spf.check2(i=ip, s=f"{TEST_LOCALPART}@{domain}", h=helo)[0]  # noqa: E731
+        spf_check = lambda ip: spf.check2(i=ip, s=f"{TEST_LOCALPART}@{spf_domain or domain}", h=helo)[0]  # noqa: E731
     out = {"spf": {}, "dkim": None}
     for fam, ip in ips:
         out["spf"][f"v{fam}"] = spf_check(ip)
@@ -127,12 +128,13 @@ async def run_test(row, settings, private_key, dns_check, deliver=smtp.deliver, 
     """Runs one test. Returns (outcome, details) with outcome passed | failed | unavailable."""
     domain, criteria = row["domain"], criteria_of(row.get("send_test_criteria"))
     ips = ([(6, settings.ipv6[0])] if settings.ipv6 else []) + ([(4, settings.ipv4[0])] if settings.ipv4 else [])
-    details = {"criteria": criteria, "families": [f"v{f}" for f, _ in ips], "precheck": None, "smartmailflow": {}, "failed": []}
+    rp = row.get("return_path_domain")
+    details = {"criteria": criteria, "families": [f"v{f}" for f, _ in ips], "return_path_domain": rp, "precheck": None, "smartmailflow": {}, "failed": []}
     if not ips:
         details["error"] = "node has no source addresses"
         return "unavailable", details
     try:
-        pre = await asyncio.to_thread(precheck, domain, row["dkim_selector"], row["dkim_public"], ips, settings.helo, dns_check, spf_check)
+        pre = await asyncio.to_thread(precheck, domain, row["dkim_selector"], row["dkim_public"], ips, settings.helo, dns_check, spf_check, rp)
     except TemporaryDns as e:
         details["error"] = str(e)
         return "unavailable", details
@@ -153,7 +155,7 @@ async def run_test(row, settings, private_key, dns_check, deliver=smtp.deliver, 
         token = f"{run_id}{fam}"
         rcpt = f"{token}@{SMF_DOMAIN[fam]}"
         data = sign(test_message(domain, rcpt, run_id), row["dkim_selector"], domain, row["dkim_algorithm"], private_key)
-        tries = await deliver(SMF_DOMAIN[fam], [rcpt], f"{TEST_LOCALPART}@{domain}", data, settings.helo, {fam: ip}, resolver)
+        tries = await deliver(SMF_DOMAIN[fam], [rcpt], f"{TEST_LOCALPART}@{rp or domain}", data, settings.helo, {fam: ip}, resolver)
         last = smtp.outcome(tries, rcpt)
         details["smartmailflow"][f"v{fam}"] = {"delivery": last.result if last else None, "code": last.code if last else None,
                                                "stage": last.stage if last else None}

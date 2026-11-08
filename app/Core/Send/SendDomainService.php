@@ -189,7 +189,7 @@ class SendDomainService
             'passed_at' => Time::toIso($row['test_passed_at'] ?? null), 'checked_at' => Time::toIso($row['test_checked_at'] ?? null),
             'next_at' => Time::toIso($row['test_next_at'] ?? null), 'requested' => ($row['test_requested_at'] ?? null) !== null,
             'running' => ($row['test_running_until'] ?? null) !== null && $row['test_running_until'] > Time::now(),
-            'error' => $row['test_error'] ?? null,
+            'error' => $row['test_error'] ?? null, 'return_path_domain' => $row['test_return_path_domain'] ?? null,
             'details' => $current && ($row['test_details'] ?? null) !== null ? json_decode($row['test_details'], true) : null,
         ];
     }

@@ -2,6 +2,24 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
+## 0.2.6 - 2026-11-08
+Send role, step 6 of 7 (decision E-27): bounces.
+- Profiles with `return_path_domain` send with the Return-Path `<message_id>-<node>-<check>@<return_path_domain>`
+  (lower case, at most 64 characters; check = 10 characters of an HMAC with a key derived from the node key, so only
+  the sending node can verify it and nothing is shared). Such mails go one recipient per SMTP transaction.
+- One return-path domain per sender domain in a project (`422 RETURN_PATH_CONFLICT`); changing it requests a new
+  domain test, which then checks SPF of the return-path domain; a test only counts for the return-path domain it was
+  made with.
+- The bounce domain's MX points to a receive node with a project for it (profile `checked`, so the raw mail is
+  kept). Every send node collects from it via the receive API (`MAILRUNNER_BOUNCE_SOURCE`, installer
+  `--bounce-source=https://<receive node>/v1`, token `BOUNCE_SOURCE_TOKEN` in secrets.env): every minute and at once
+  after a ping to `POST /hooks/bounces` (webhook target of the bounce project, no token). It checks the address,
+  reads the delivery status notification (RFC 3464) and acknowledges only its own bounces.
+- A permanent failure (`Action: failed`) marks the message `bounced` (`bounce_report`), also after `sent`, with the
+  report as a delivery attempt (stage `bounce`); delayed notices and auto-replies are ignored. Webhook `delivery`.
+- Self test `send.bounces` (bounce project reachable with the token); admin API `send.bounces` (source, last run,
+  last error).
+
 ## 0.2.5 - 2026-11-08
 Send role, step 5 of 7 (decision E-27): domain test. From now on a domain with a passed test sends.
 - mr-sender tests a domain when its key changes (`PUT /v1/domains/{domain}`), when a mail waits for a test, on

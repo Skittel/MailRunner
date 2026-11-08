@@ -94,8 +94,8 @@ class Queue:
                 return [], changed
             marks = ",".join(["%s"] * len(locked))
             cur.execute(
-                f"""SELECT m.*, s.submission_id, s.envelope_from, s.from_domain, s.raw_path,
-                          d.id AS domain_row, d.dkim_selector, d.dkim_algorithm, d.key_sha256, d.test_status, d.test_key_sha256,
+                f"""SELECT m.*, s.submission_id, s.envelope_from, s.return_path_domain, s.from_domain, s.raw_path,
+                          d.id AS domain_row, d.dkim_selector, d.dkim_algorithm, d.key_sha256, d.test_status, d.test_key_sha256, d.test_return_path_domain,
                           p.enabled AS project_enabled, c.enabled AS customer_enabled
                    FROM send_messages m
                    JOIN send_submissions s ON s.id = m.submission_row_id
@@ -131,7 +131,8 @@ class Queue:
             return "failed", "expired", None
         if not m["project_enabled"] or not m["customer_enabled"]:
             return "deferred", "project_disabled", min(t + dt.timedelta(seconds=DISABLED_RECHECK), m["expires_at"])
-        if m["test_status"] != "passed" or m["test_key_sha256"] != m["key_sha256"]:
+        # the test is valid for one key and one return-path domain (SPF is checked for the return-path domain)
+        if m["test_status"] != "passed" or m["test_key_sha256"] != m["key_sha256"] or m.get("test_return_path_domain") != m.get("return_path_domain"):
             if t >= m["created_at"] + dt.timedelta(seconds=TEST_WAIT) and m["attempts"] == 0:
                 return "failed", "dns_not_verified", None
             if m["attempts"] > 0:   # the test failed later (interval test): stop sending, keep retry timing
@@ -222,9 +223,20 @@ class Queue:
             rows = cur.fetchall()
             for r in rows:
                 r["trigger"] = "requested" if r["test_requested_at"] is not None else "waiting" if r["waiting"] else "interval"
+                r["return_path_domain"] = self.return_path_of(cur, r["project_id"], r["domain"])
                 cur.execute("UPDATE send_domains SET test_running_until = %s WHERE id = %s", (t + dt.timedelta(seconds=self.TEST_LEASE), r["id"]))
             return rows
         return self._tx(run)
+
+    @staticmethod
+    def return_path_of(cur, project_id, domain):
+        """Return-path domain of the profiles sending from the domain (one per domain, enforced by the API); None = own."""
+        cur.execute("SELECT senders, return_path_domain FROM send_profiles WHERE project_id = %s ORDER BY enabled DESC, id", (project_id,))
+        for p in cur.fetchall():
+            senders = json.loads(p["senders"]) if isinstance(p["senders"], str) else (p["senders"] or [])
+            if any(e == domain or e.rsplit("@", 1)[-1] == domain for e in senders):
+                return p["return_path_domain"]
+        return None
 
     def interval_hours(self, cur, project_id, domain):
         """Shortest test interval of the enabled profiles that send from the domain; None if no profile uses it."""
@@ -261,10 +273,10 @@ class Queue:
                     nxt = t + dt.timedelta(hours=interval) if interval else None
                 else:
                     nxt = t + dt.timedelta(seconds=min(self.FAILED_RETRY, (interval or 1) * 3600)) if interval else None
-                cur.execute("UPDATE send_domains SET test_status = %s, test_key_sha256 = %s, test_passed_at = IF(%s, %s, test_passed_at), test_checked_at = %s, "
-                            "test_details = %s, test_error = NULL, test_next_at = %s, test_running_until = NULL, "
+                cur.execute("UPDATE send_domains SET test_status = %s, test_key_sha256 = %s, test_return_path_domain = %s, test_passed_at = IF(%s, %s, test_passed_at), "
+                            "test_checked_at = %s, test_details = %s, test_error = NULL, test_next_at = %s, test_running_until = NULL, "
                             "test_requested_at = IF(%s, test_requested_at, NULL) WHERE id = %s",
-                            (outcome, key_sha256, outcome == "passed", t, t, json.dumps(details), nxt, requested_again, row["id"]))
+                            (outcome, key_sha256, row.get("return_path_domain"), outcome == "passed", t, t, json.dumps(details), nxt, requested_again, row["id"]))
                 if outcome == "passed":   # waiting mails go now (the gate checks again)
                     cur.execute("""UPDATE send_messages m JOIN send_submissions s ON s.id = m.submission_row_id
                                    SET m.next_attempt_at = %s
@@ -286,4 +298,40 @@ class Queue:
         cur.execute("INSERT INTO journal (id, created_at, event, source, actor, customer_id, project_id, details) VALUES (%s, %s, %s, 'system', 'mr-sender', %s, %s, %s)",
                     (jid, t, event, customer_id, project_id, json.dumps(details, ensure_ascii=False, separators=(",", ":"))))
         return jid
+
+    # ------------------------------------------------------------------ bounces (step 6)
+    def bounce_cursor(self, source):
+        def run(cur):
+            cur.execute("SELECT after_id FROM send_bounce_state WHERE source = %s", (source,))
+            r = cur.fetchone()
+            return int(r["after_id"]) if r else 0
+        return self._tx(run)
+
+    def save_bounce_cursor(self, source, after_id, error=None, now=None):
+        def run(cur):
+            cur.execute("INSERT INTO send_bounce_state (source, after_id, checked_at, last_error) VALUES (%s, %s, %s, %s) "
+                        "ON DUPLICATE KEY UPDATE after_id = VALUES(after_id), checked_at = VALUES(checked_at), last_error = VALUES(last_error)",
+                        (source, after_id, now or utcnow(), (error or "")[:255] or None))
+        return self._tx(run)
+
+    def record_bounce(self, mail_id, fail, now=None):
+        """A permanent failure reported by DSN for a message of this node: status bounced (also after "sent").
+        Idempotent: a message already bounced by a report is left alone. Returns True if the status changed."""
+        def run(cur):
+            t = now or utcnow()
+            cur.execute("SELECT id, project_id, status, status_reason, attempts FROM send_messages WHERE message_id = %s FOR UPDATE", (mail_id,))
+            m = cur.fetchone()
+            if m is None or (m["status"] == "bounced" and m["status_reason"] == "bounce_report"):
+                return False
+            code = int(fail.get("code") or 550)
+            text = (fail.get("diagnostic") or "")[:512] or None
+            cur.execute("INSERT INTO send_attempts (message_row_id, attempt_no, started_at, duration_ms, stage, result, smtp_code, enhanced_code, response) "
+                        "VALUES (%s, %s, %s, 0, 'bounce', 'bounced', %s, %s, %s)",
+                        (m["id"], max(1, int(m["attempts"])), t, code, fail.get("status"), text))
+            cur.execute("UPDATE send_messages SET status = 'bounced', status_reason = 'bounce_report', next_attempt_at = NULL, lease_until = NULL, "
+                        "last_code = %s, last_enhanced = %s, last_response = %s, updated_at = %s, change_seq = %s WHERE id = %s",
+                        (code, fail.get("status"), text, t, self.take_seq(cur), m["id"]))
+            self._mark_webhooks(cur, {m["project_id"]}, t)
+            return True
+        return self._tx(run)
 

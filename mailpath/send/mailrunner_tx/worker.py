@@ -8,7 +8,8 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from . import domaintest, schedule, smtp
+from . import bounce, domaintest, schedule, smtp
+from .queue import Queue
 from .signing import SIGN_HEADERS, LocalError, sign  # noqa: F401 (used by tests and domaintest)
 from .queue import utcnow
 
@@ -17,6 +18,7 @@ PER_DOMAIN = 3
 POLL_SECONDS = 1.0
 GROUP_TIMEOUT = 900
 MAX_TESTS = 2            # domain tests at once
+BOUNCE_EVERY = 60        # collect bounces at least this often (and right after a ping to /hooks/bounces)
 TEST_POLL_SECONDS = 10
 def decide(message, tried, now):
     """New status of a message after a delivery attempt: (status, reason, next_attempt_at)."""
@@ -50,6 +52,12 @@ class Worker:
         self.dns_check = dns_check
         self.run_test = run_test
         self.next_test_poll = 0.0
+        self.bounce_key = bounce.bounce_key(node_key)
+        self.bounce_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mr-sender-bounce")
+        self.bounce_queue = None
+        self.bounce_task = None
+        self.next_bounce = 0.0
+        self.bounce_ping = 0.0
 
     async def _db(self, fn, *args):
         return await asyncio.get_running_loop().run_in_executor(self.db, fn, *args)
@@ -78,6 +86,7 @@ class Worker:
                     task = asyncio.create_task(self.handle(group))
                     self.tasks.add(task)
                     task.add_done_callback(self.tasks.discard)
+            self.maybe_collect_bounces()
             if time.monotonic() >= self.next_test_poll and len(self.tests) < MAX_TESTS:
                 self.next_test_poll = time.monotonic() + TEST_POLL_SECONDS
                 try:
@@ -117,10 +126,56 @@ class Worker:
 
     @staticmethod
     def groups(rows):
+        """Recipients of one submission and domain share a transaction - unless the profile has a return-path domain:
+        then every message has its own Return-Path (bounce address) and its own transaction."""
         out = {}
         for m in rows:
-            out.setdefault((m["submission_id"], m["recipient_domain"]), []).append(m)
+            key = (m["submission_id"], m["recipient_domain"]) if not m.get("return_path_domain") else (m["submission_id"], m["message_id"])
+            out.setdefault(key, []).append(m)
         return list(out.values())
+
+    def envelope_from(self, m):
+        if m.get("return_path_domain"):
+            return bounce.address(self.bounce_key, m["message_id"], self.s.node_id, m["return_path_domain"])
+        return m["envelope_from"]
+
+    # ------------------------------------------------------------------ bounces
+    def maybe_collect_bounces(self):
+        if not getattr(self.s, "bounce_source", "") or not getattr(self.s, "bounce_token", ""):
+            return
+        if self.bounce_task is not None and not self.bounce_task.done():
+            return
+        try:
+            ping = os.stat(self.s.bounce_request).st_mtime
+        except OSError:
+            ping = 0.0
+        if time.monotonic() < self.next_bounce and ping <= self.bounce_ping:
+            return
+        self.bounce_ping = max(ping, self.bounce_ping)
+        self.next_bounce = time.monotonic() + BOUNCE_EVERY
+        self.bounce_task = asyncio.get_running_loop().run_in_executor(self.bounce_pool, self.collect_bounces)
+
+    def collect_bounces(self):
+        """Runs in its own thread with its own database connection (HTTP calls must not block deliveries)."""
+        if self.bounce_queue is None:
+            self.bounce_queue = Queue(self.s.db)
+        q, src = self.bounce_queue, self.s.bounce_source
+        try:
+            after = q.bounce_cursor(src)
+            cursor, stats = bounce.collect(bounce.Source(src, self.s.bounce_token), self.bounce_key, self.s.node_id, after,
+                                           lambda mail_id, fail: q.record_bounce(mail_id, fail), self.log)
+            q.save_bounce_cursor(src, cursor)
+            if q.pending_pings > 0:
+                self.queue.pending_pings = max(self.queue.pending_pings, 1)
+                self.wake_webhooks()
+            if stats["seen"]:
+                self.log("info", "bounces: " + " ".join(f"{k}={v}" for k, v in stats.items()))
+        except Exception as e:
+            self.log("warning", f"bounce collection failed: {e.__class__.__name__}: {str(e)[:200]}")
+            try:
+                q.save_bounce_cursor(src, q.bounce_cursor(src), f"{e.__class__.__name__}: {str(e)[:200]}")
+            except Exception:
+                pass
 
     def prepare(self, m):
         """Decrypted and DKIM-signed mail of the submission (memory only)."""
@@ -148,7 +203,7 @@ class Worker:
             try:
                 data = await self._db(self.prepare, rows[0])
                 sources = {6: self.s.ipv6[0] if self.s.ipv6 else None, 4: self.s.ipv4[0] if self.s.ipv4 else None}
-                tries = await asyncio.wait_for(self.deliver(domain, rcpts, rows[0]["envelope_from"], data, self.s.helo, sources, self.resolver), GROUP_TIMEOUT)
+                tries = await asyncio.wait_for(self.deliver(domain, rcpts, self.envelope_from(rows[0]), data, self.s.helo, sources, self.resolver), GROUP_TIMEOUT)
             except LocalError as e:
                 tries = [smtp.Try("local", "failed", rcpts, None, None, str(e), started=t0)]
             except asyncio.TimeoutError:

@@ -874,6 +874,27 @@ def send_checks(run, helo, ips, resolve=None, ptr=None, probe=None, own=None, ac
         ok = active("mailrunner-sender")
         run.add("send", "send.worker", "ok" if ok else "fail", "delivery worker mailrunner-sender running" if ok else "delivery worker mailrunner-sender is not running")
 
+def bounce_check(run, source, token=None, fetch=None):
+    """Send role: the receive API of the bounce project answers with the node's token (BOUNCE_SOURCE_TOKEN)."""
+    token = token if token is not None else secrets.load().get("BOUNCE_SOURCE_TOKEN", "")
+    if not token:
+        run.add("send", "send.bounces", "fail", "MAILRUNNER_BOUNCE_SOURCE is set, but BOUNCE_SOURCE_TOKEN is missing in secrets.env")
+        return
+    t0 = time.monotonic()
+    try:
+        if fetch is None:
+            import urllib.request
+            req = urllib.request.Request(source.rstrip("/") + "/messages?acked=0&limit=1", headers={"Authorization": "Bearer " + token, "User-Agent": "MailRunner-selftest"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                code = resp.status
+        else:
+            code = fetch(source, token)
+        status, detail = ("ok", "bounce project reachable with the node's token") if code == 200 else ("fail", f"bounce source answered HTTP {code}")
+    except Exception as e:
+        status, detail = "fail", f"bounce source not reachable ({e.__class__.__name__}: {str(getattr(e, 'code', '') or '')})".replace(": )", ")")
+    run.add("send", "send.bounces", status, detail, (time.monotonic() - t0) * 1000)
+
+
 # --------------------------------------------------------------------------- main
 def run_all(hostname, journal_after=0, skip_mail=False, mx_names="", send=None):
     """send: None = send role off, else {"helo": str, "ips": [str]}"""
@@ -885,6 +906,8 @@ def run_all(hostname, journal_after=0, skip_mail=False, mx_names="", send=None):
     route_mx_checks(run)
     if send is not None:
         send_checks(run, send.get("helo", ""), send.get("ips", []), active=_service_active)
+        if send.get("bounce_source"):
+            bounce_check(run, send["bounce_source"])
     if skip_mail:
         return run.result()
     if not zone_ok:
