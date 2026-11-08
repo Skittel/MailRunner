@@ -1,9 +1,9 @@
 """Bounces of the send role (decision E-27).
 
 Return-Path of a mail whose profile has a return_path_domain:
-    <mail-id>-<node-id>-<check>@<return_path_domain>      e.g. mrm_k3f9x2m7q1w8e4r6-sirius-eu-7hq2m0x4k9@bounce.example
+    <mail-id>-<node-id>-<check>@<return_path_domain>      e.g. mrm_k3f9x2m7q1w8e4r6-node1-eu-7hq2m0x4k9@bounce.example
   mail-id   public message id (mrm_ + 16), never the database id
-  node-id   MAILRUNNER_NODE_ID with dots as hyphens ("sirius.eu" -> "sirius-eu")
+  node-id   MAILRUNNER_NODE_ID with dots as hyphens ("node1.eu" -> "node1-eu")
   check     10 characters of an HMAC-SHA256 over mail-id and node-id, with a key derived from the node key: only the
             node that sent the mail can check it, nothing has to be shared, forged bounces are ignored
 All lower case; parsed from both ends (the mail-id has a fixed length, the check too).

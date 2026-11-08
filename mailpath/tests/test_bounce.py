@@ -27,18 +27,18 @@ def dsn(action="failed", status="5.1.1", diag="smtp; 550 5.1.1 <a@example.net>: 
 
 class AddressTest(unittest.TestCase):
     def test_roundtrip_and_checks(self):
-        a = bounce.address(KEY, MAIL_ID, "sirius.eu", "Bounce.Example")
+        a = bounce.address(KEY, MAIL_ID, "node1.eu", "Bounce.Example")
         local = a.split("@")[0]
-        self.assertRegex(a, r"^mrm_k3f9x2m7q1w8e4r6-sirius-eu-[a-z2-7]{10}@bounce\.example$")
+        self.assertRegex(a, r"^mrm_k3f9x2m7q1w8e4r6-node1-eu-[a-z2-7]{10}@bounce\.example$")
         self.assertLessEqual(len(local), 64)
-        self.assertEqual(MAIL_ID, bounce.verify(KEY, a.upper(), "sirius.eu"), "case-insensitive")
-        self.assertEqual(MAIL_ID, bounce.verify(KEY, f"<{a}>", "sirius.eu"))
-        self.assertEqual("other", bounce.verify(KEY, bounce.address(KEY, MAIL_ID, "vega.eu", "bounce.example"), "sirius.eu"))
+        self.assertEqual(MAIL_ID, bounce.verify(KEY, a.upper(), "node1.eu"), "case-insensitive")
+        self.assertEqual(MAIL_ID, bounce.verify(KEY, f"<{a}>", "node1.eu"))
+        self.assertEqual("other", bounce.verify(KEY, bounce.address(KEY, MAIL_ID, "node2.eu", "bounce.example"), "node1.eu"))
         forged = local[:-1] + ("a" if local[-1] != "a" else "b") + "@bounce.example"
-        self.assertIsNone(bounce.verify(KEY, forged, "sirius.eu"), "wrong check value")
-        self.assertIsNone(bounce.verify(bounce.bounce_key(b"x" * 32), a, "sirius.eu"), "another node key")
-        for junk in ("postmaster@bounce.example", "mrm_short-sirius-eu-aaaaaaaaaa@x", "", "mrm_k3f9x2m7q1w8e4r6--aaaaaaaaaa@x"):
-            self.assertIsNone(bounce.verify(KEY, junk, "sirius.eu"), junk)
+        self.assertIsNone(bounce.verify(KEY, forged, "node1.eu"), "wrong check value")
+        self.assertIsNone(bounce.verify(bounce.bounce_key(b"x" * 32), a, "node1.eu"), "another node key")
+        for junk in ("postmaster@bounce.example", "mrm_short-node1-eu-aaaaaaaaaa@x", "", "mrm_k3f9x2m7q1w8e4r6--aaaaaaaaaa@x"):
+            self.assertIsNone(bounce.verify(KEY, junk, "node1.eu"), junk)
         self.assertEqual(("mrm_k3f9x2m7q1w8e4r6", "node-with-hyphens-1", "abcdefghij"),
                          bounce.parse("mrm_k3f9x2m7q1w8e4r6-node-with-hyphens-1-abcdefghij@b.example"))
 
@@ -72,15 +72,15 @@ class FakeSource:
 
 class CollectTest(unittest.TestCase):
     def test_only_own_valid_failures_are_applied_and_acknowledged(self):
-        own = bounce.address(KEY, MAIL_ID, "sirius.eu", "bounce.example")
-        other = bounce.address(KEY, "mrm_aaaaaaaaaaaaaaaa", "vega.eu", "bounce.example")
+        own = bounce.address(KEY, MAIL_ID, "node1.eu", "bounce.example")
+        other = bounce.address(KEY, "mrm_aaaaaaaaaaaaaaaa", "node2.eu", "bounce.example")
         items = [{"cursor": 11, "message_id": "r1", "envelope": {"rcpt": own}},
                  {"cursor": 12, "message_id": "r2", "envelope": {"rcpt": other}},
                  {"cursor": 13, "message_id": "r3", "envelope": {"rcpt": "postmaster@bounce.example"}},
                  {"cursor": 14, "message_id": "r4", "envelope": {"rcpt": own}}]
         src = FakeSource(items, {"r1": dsn(), "r4": b"Subject: Auto-reply\r\n\r\nx\r\n"})
         applied = []
-        cursor, stats = bounce.collect(src, KEY, "sirius.eu", 10, lambda mid, f: applied.append((mid, f["status"])) or True, lambda *a: None)
+        cursor, stats = bounce.collect(src, KEY, "node1.eu", 10, lambda mid, f: applied.append((mid, f["status"])) or True, lambda *a: None)
         self.assertEqual([(MAIL_ID, "5.1.1")], applied)
         self.assertEqual(["r1", "r3", "r4"], src.acked, "never acknowledge another node's bounces")
         self.assertEqual((14, 1, 1, 2), (cursor, stats["bounced"], stats["other_node"], stats["ignored"]))
@@ -88,13 +88,13 @@ class CollectTest(unittest.TestCase):
 
 class WorkerReturnPathTest(unittest.TestCase):
     def test_return_path_and_grouping(self):
-        s = settings.Settings({"MAILRUNNER_NODE_ID": "sirius.eu", "MAILRUNNER_SEND_HELO": "n.example", "MAILRUNNER_SEND_IPV4": "192.0.2.1"})
+        s = settings.Settings({"MAILRUNNER_NODE_ID": "node1.eu", "MAILRUNNER_SEND_HELO": "n.example", "MAILRUNNER_SEND_IPV4": "192.0.2.1"})
         w = worker.Worker(s, None, b"k" * 32, None, None, lambda *a: None)
         plain = {"submission_id": "mrs_1", "recipient_domain": "example.net", "envelope_from": "info@shop.example", "return_path_domain": None}
         self.assertEqual("info@shop.example", w.envelope_from(dict(plain, message_id=MAIL_ID)))
         rp = dict(plain, return_path_domain="bounce.example")
         addr = w.envelope_from(dict(rp, message_id=MAIL_ID))
-        self.assertEqual(MAIL_ID, bounce.verify(KEY, addr, "sirius.eu"))
+        self.assertEqual(MAIL_ID, bounce.verify(KEY, addr, "node1.eu"))
         rows = [dict(plain, message_id="mrm_a"), dict(plain, message_id="mrm_b"), dict(rp, message_id="mrm_c"), dict(rp, message_id="mrm_d")]
         self.assertEqual([2, 1, 1], [len(g) for g in w.groups(rows)], "own Return-Path: one transaction per message")
 
