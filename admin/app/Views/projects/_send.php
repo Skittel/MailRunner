@@ -14,7 +14,9 @@ $access = static fn (array $a) => match ($a['type']) {
     default => '',
 };
 $central ??= ['central' => null, 'nodes' => []];
-$syncError ??= null;
+$notice ??= null;
+$write = can_write();
+$base = '/projects/' . $project['public_id'] . '/send';
 $c = $central['central'];
 $queueLabels = ['waiting_test' => 'wartet auf Test', 'queued' => 'wartet', 'sending' => 'in Zustellung', 'deferred' => 'zurückgestellt'];
 $finalLabels = ['sent' => 'zugestellt', 'bounced' => 'Bounce', 'failed' => 'fehlgeschlagen'];
@@ -39,12 +41,12 @@ $finalLabels = ['sent' => 'zugestellt', 'bounced' => 'Bounce', 'failed' => 'fehl
                 <?php else: ?><span class="badge bg-orange-lt">weicht ab</span><?php endif ?>
             </div>
             <?php endforeach ?>
-            <?php if ($syncError !== null): ?><div class="small mt-1 <?= $syncError === '' ? 'text-green' : 'text-red' ?>"><?= $syncError === '' ? 'Abgeglichen.' : 'Abgleich: ' . esc($syncError) ?></div><?php endif ?>
+            <?php if ($notice !== null): ?><div class="small mt-1 <?= $notice[0] === 'ok' ? 'text-green' : 'text-red' ?>"><?= esc($notice[1]) ?></div><?php endif ?>
         </div>
-        <?php if (can_write()): ?><button class="btn btn-sm btn-outline-primary" hx-post="/projects/<?= $project['public_id'] ?>/send/sync" hx-target="#send">Jetzt abgleichen</button><?php endif ?>
+        <?php if ($write): ?><button class="btn btn-sm btn-outline-primary" hx-post="<?= $base ?>/sync" hx-target="#send">Jetzt abgleichen</button><?php endif ?>
     </div>
 </div>
-<?php foreach ($nodes as $n): $d = $n['data']; ?>
+<?php foreach ($nodes as $ni => $n): $d = $n['data']; $own = $ni === 0; /* actions on access locks only on the project's node: the admin distributes them */ ?>
 <?php if (count($nodes) > 1): ?><div class="card-body border-bottom bg-light py-2 fw-bold"><?= esc($n['label']) ?> <span class="mono"><?= esc($n['node_key']) ?></span></div><?php endif ?>
 <?php if ($d === null): ?>
     <div class="card-body border-bottom"><div class="alert alert-warning mb-0">Node <span class="mono"><?= esc($n['node_key']) ?></span> nicht erreichbar: keine Versanddaten.</div></div>
@@ -76,7 +78,7 @@ $finalLabels = ['sent' => 'zugestellt', 'bounced' => 'Bounce', 'failed' => 'fehl
     <div class="text-secondary small">Noch keine Domain: Die Anwendung des Kunden legt sie per API an (<code>PUT /v1/domains/{domain}</code>).</div>
 <?php else: ?>
     <div class="table-responsive"><table class="table table-sm table-vcenter mb-0">
-        <thead><tr><th>Domain</th><th>DKIM</th><th>Test</th><th>Bestanden</th><th>Nächster Test</th><th>Return-Path</th></tr></thead>
+        <thead><tr><th>Domain</th><th>DKIM</th><th>Test</th><th>Bestanden</th><th>Nächster Test</th><th>Return-Path</th><?php if ($write): ?><th></th><?php endif ?></tr></thead>
         <tbody>
         <?php foreach ($domains as $dm): $t = $dm['test'] ?? []; $failed = $t['details']['failed'] ?? []; ?>
             <tr>
@@ -88,6 +90,9 @@ $finalLabels = ['sent' => 'zugestellt', 'bounced' => 'Bounce', 'failed' => 'fehl
                 <td class="small"><?= dt($t['passed_at'] ?? null) ?></td>
                 <td class="small"><?= dt($t['next_at'] ?? null) ?></td>
                 <td class="small mono"><?= esc($t['return_path_domain'] ?? '') ?: '<span class="text-secondary">Domain selbst</span>' ?></td>
+                <?php if ($write): ?><td class="w-1"><?php if (! empty($t['requested'])): ?><span class="badge bg-blue-lt">angefordert</span><?php else: ?><button class="btn btn-sm btn-outline-secondary text-nowrap"
+                    hx-post="<?= $base ?>/domains/<?= esc(rawurlencode($dm['domain']), 'attr') ?>/test" hx-vals='<?= esc(json_encode(['node' => $n['node_key']]), 'attr') ?>' hx-target="#send"
+                    title="Test auf <?= esc($n['node_key'], 'attr') ?> jetzt starten">Test anfordern</button><?php endif ?></td><?php endif ?>
             </tr>
         <?php endforeach ?>
         </tbody>
@@ -124,7 +129,13 @@ $finalLabels = ['sent' => 'zugestellt', 'bounced' => 'Bounce', 'failed' => 'fehl
                     <td class="w-1"><span class="badge bg-blue-lt"><?= esc(['api' => 'API', 'smtp' => 'SMTP', 'ip' => 'IP'][$a['type']] ?? $a['type']) ?></span></td>
                     <td><?= $access($a) ?><?= $a['label'] ? ' <span class="small text-secondary">' . esc($a['label']) . '</span>' : '' ?></td>
                     <td class="small text-secondary text-nowrap"><?= $a['type'] === 'ip' ? '' : 'benutzt ' . ago($a['last_used_at'] ?? null) ?></td>
-                    <td class="w-1"><?= $a['enabled'] ? '<span class="badge bg-green-lt">aktiv</span>' : '<span class="badge bg-secondary-lt">gesperrt</span>' ?></td>
+                    <td class="w-1 text-nowrap"><?php if (! empty($a['locked'])): ?><span class="badge bg-red-lt" title="seit <?= esc(dt($a['locked_at'] ?? null), 'attr') ?>">vom Betreiber gesperrt</span>
+                        <div class="small text-red"><?= esc((string) ($a['locked_reason'] ?? '')) ?></div>
+                        <?php else: ?><?= $a['enabled'] ? '<span class="badge bg-green-lt">aktiv</span>' : '<span class="badge bg-secondary-lt" title="vom Kunden ausgeschaltet">aus</span>' ?><?php endif ?></td>
+                    <?php if ($write && $own): ?><td class="w-1"><?php if (! empty($a['locked'])): ?><button class="btn btn-sm btn-outline-secondary" hx-post="<?= $base ?>/accesses/<?= esc($a['access_id'], 'attr') ?>/unlock" hx-target="#send"
+                        hx-confirm="Sperre von <?= esc($a['access_id'], 'attr') ?> auf allen Nodes aufheben?">Entsperren</button>
+                        <?php elseif (array_key_exists('locked', $a)): ?><button class="btn btn-sm btn-outline-danger" hx-post="<?= $base ?>/accesses/<?= esc($a['access_id'], 'attr') ?>/lock" hx-target="#send"
+                        hx-prompt="Grund der Sperre von <?= esc($a['access_id'], 'attr') ?> (sieht der Kunde, bis 200 Zeichen):">Sperren</button><?php endif ?></td><?php endif ?>
                 </tr>
             <?php endforeach ?>
             </tbody>

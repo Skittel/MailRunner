@@ -66,6 +66,7 @@ class PendingChanges
                 'project'      => $changes->project($change['ref'], $change['payload'], $ctx),
                 'token_revoke' => $changes->revokeToken($change['ref'], $ctx),
                 'secrets'      => $changes->secrets((string) $change['payload']['revision'], AdminChanges::decryptSecrets($change['payload']), $ctx),
+                'send_access_lock' => $changes->accessLock($change['ref'], $change['payload'], $ctx),
                 'send_config'  => $changes->sendConfig($change['ref'], AdminChanges::decryptSendConfig($change['ref'], $change['payload']), $ctx),
             };
             $this->decide((int) $change['id'], 'applied', $approvedBy, null);

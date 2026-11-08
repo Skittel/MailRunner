@@ -50,7 +50,7 @@ class SendSubmissionService
     public function access(string $accessId): ?array
     {
         return $this->db->query(
-            'SELECT a.access_id, a.type, a.enabled AS access_enabled, a.project_id, p.id AS profile_row_id, p.name AS profile_name, p.enabled AS profile_enabled,
+            'SELECT a.access_id, a.type, a.enabled AS access_enabled, a.locked_at, a.locked_reason, a.project_id, p.id AS profile_row_id, p.name AS profile_name, p.enabled AS profile_enabled,
                     p.senders, p.recipients, p.limit_hour, p.limit_day, p.retry_attempts, p.retry_seconds, p.return_path_domain
              FROM send_accesses a JOIN send_profiles p ON p.id = a.profile_id WHERE a.access_id = ?',
             [$accessId],
@@ -86,6 +86,9 @@ class SendSubmissionService
     {
         if (! (bool) $access['access_enabled'] || ! (bool) $access['profile_enabled']) {
             throw new SendRejected('ACCESS_DISABLED', 'The send access or its profile is disabled', 403, '550', '5.7.1');
+        }
+        if (($access['locked_at'] ?? null) !== null) {
+            throw new SendRejected('ACCESS_LOCKED', 'The operator locked this send access: ' . $access['locked_reason'], 403, '550', '5.7.1');
         }
         if (strlen($raw) > self::MAX_SIZE) {
             throw new SendRejected('MESSAGE_TOO_LARGE', 'The message is larger than ' . (self::MAX_SIZE >> 20) . ' MB', 413, '552', '5.3.4');

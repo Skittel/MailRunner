@@ -75,6 +75,9 @@ $routes->group('admin/v1', ['filter' => 'admincert'], static function (RouteColl
     $routes->post('projects/(:segment)/(:segment)/tokens', '\App\Controllers\Admin\V1\Projects::createToken/$1/$2');
     $routes->get('projects/(:segment)/(:segment)/send-config', '\App\Controllers\Admin\V1\Projects::sendConfig/$1/$2');
     $routes->put('projects/(:segment)/(:segment)/send-config', '\App\Controllers\Admin\V1\Projects::putSendConfig/$1/$2');
+    $routes->put('projects/(:segment)/(:segment)/send-accesses/(:segment)/lock', '\App\Controllers\Admin\V1\Projects::lockAccess/$1/$2/$3');
+    $routes->delete('projects/(:segment)/(:segment)/send-accesses/(:segment)/lock', '\App\Controllers\Admin\V1\Projects::unlockAccess/$1/$2/$3');
+    $routes->post('projects/(:segment)/(:segment)/domains/(:segment)/test', '\App\Controllers\Admin\V1\Projects::testDomain/$1/$2/$3');
     $routes->delete('tokens/(:segment)', '\App\Controllers\Admin\V1\Projects::revokeToken/$1');
 
     if (config('Mailrunner')->receiveEnabled) {

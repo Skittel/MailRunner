@@ -174,7 +174,7 @@ final class PagesTest extends CIUnitTestCase
         ];
         $html = view('projects/_send', ['project' => ['public_id' => 'pr0j-0002'], 'nodes' => [['label' => 'Node', 'node_key' => 'node1.eu', 'data' => $data]]]);
         foreach (['shop.example', 'durchgefallen', 'Fehlt: dkim.v6', 'bounce.example', 'nicht erlaubt', 'angefordert', 'no SmartMailFlow result', 'rsa 2048',
-            'Limit 100/h · 1000/Tag', '(Projekt)', '16 Versuche in 8 h', 'mrt_aaaaaaaaaaaaaaaa', 'shop-relay', 'gesperrt', '192.0.2.8/29',
+            'Limit 100/h · 1000/Tag', '(Projekt)', '16 Versuche in 8 h', 'mrt_aaaaaaaaaaaaaaaa', 'shop-relay', 'vom Kunden ausgeschaltet', '192.0.2.8/29',
             'zurückgestellt', 'mrm_bbbbbbbbbbbbbbbb', 'example.net', '451 4.7.1 Greylisted &lt;try later&gt;', 'wartet auf Test'] as $text) {
             $this->assertStringContainsString($text, $html, $text);
         }

@@ -279,6 +279,37 @@ class SendAccessService
     }
 
     /**
+     * Admin lock (operator, e.g. abuse): the access stops working until the admin lifts it; the customer sees the lock
+     * and its reason but cannot change it. Returns the access; unchanged if it already is in that state.
+     *
+     * @return array<string, mixed>
+     */
+    public function lock(int $projectId, string $accessId, bool $locked, string $reason, ChangeContext $ctx): array
+    {
+        $reason = trim($reason);
+        if ($locked && ($reason === '' || mb_strlen($reason) > 200)) {
+            throw new ConfigException('INVALID_ACCESS', 'A lock needs a reason (1 to 200 characters)');
+        }
+
+        return Transaction::run($this->db, function () use ($projectId, $accessId, $locked, $reason, $ctx): array {
+            $project = $this->domains->sendProject($projectId);
+            $a       = $this->get($projectId, $accessId);
+            if (($a['locked_at'] !== null) === $locked && (! $locked || $a['locked_reason'] === $reason)) {
+                return $a;
+            }
+            $now = Time::now();
+            $this->db->table('send_accesses')->where('id', $a['id'])->update([
+                'locked_at' => $locked ? ($a['locked_at'] ?? $now) : null, 'locked_reason' => $locked ? $reason : null, 'updated_at' => $now,
+            ]);
+            $this->journal->append($locked ? 'send.access.locked' : 'send.access.unlocked', $ctx, (int) $project['customer_id'], $projectId,
+                ['access_id' => $accessId, 'profile' => $a['profile_name'], 'type' => $a['type']] + ($locked ? ['reason' => $reason] : []));
+            ProjectService::requestApply(); // mail path (credentials.json, send.json, send_clients.cidr)
+
+            return $this->get($projectId, $accessId);
+        });
+    }
+
+    /**
      * Revokes every access of a profile (profile deletion). Call inside the caller's transaction.
      *
      * @param array<string, mixed> $profile
@@ -304,6 +335,7 @@ class SendAccessService
     {
         $out = [
             'access_id' => $a['access_id'], 'profile' => $a['profile_name'], 'type' => $a['type'], 'label' => $a['label'], 'enabled' => (bool) $a['enabled'],
+            'locked' => $a['locked_at'] !== null, 'locked_at' => Time::toIso($a['locked_at']), 'locked_reason' => $a['locked_reason'],
             'created_at' => Time::toIso($a['created_at']), 'updated_at' => Time::toIso($a['updated_at']),
         ];
 

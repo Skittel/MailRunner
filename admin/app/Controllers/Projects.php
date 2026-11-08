@@ -176,7 +176,7 @@ class Projects extends BaseController
      * htmx partial of send projects (E-27 step 7): domains with test state, send profiles with accesses and the
      * queue, read live from the project's nodes and not stored here. Shows recipient domains only, no addresses.
      */
-    public function send(string $pid, ?string $syncError = null)
+    public function send(string $pid, ?array $notice = null)
     {
         $p = $this->find(PublicId::id('projects', $pid));
         if (($p['type'] ?? 'receive') !== 'send') {
@@ -191,7 +191,7 @@ class Projects extends BaseController
                 'data' => $this->sync()->projectOnNode((int) $p['id'], $nid)];
         }
 
-        return view('projects/_send', ['project' => $p, 'nodes' => $nodes, 'central' => (new SendConfigs())->overview((int) $p['id']), 'syncError' => $syncError]);
+        return view('projects/_send', ['project' => $p, 'nodes' => $nodes, 'central' => (new SendConfigs())->overview((int) $p['id']), 'notice' => $notice]);
     }
 
     /** htmx: take the send configuration over / put it on every node now, then show the card again. */
@@ -201,7 +201,46 @@ class Projects extends BaseController
         $err = (new SendConfigs())->reconcile((int) $p['id']);
         Audit::log('send_config.sync_requested', $p['customer_key'] . '/' . $p['project_key'], ['error' => $err]);
 
-        return $this->send($pid, $err ?? '');
+        return $this->send($pid, $err === null ? ['ok', 'Abgeglichen.'] : ['error', 'Abgleich: ' . $err]);
+    }
+
+    /** htmx: lock a send access (reason from the prompt, the customer sees it) on every node of the project. */
+    public function sendLock(string $pid, string $accessId)
+    {
+        $reason = trim((string) ($this->request->getHeaderLine('HX-Prompt') ?: $this->request->getPost('reason')));
+        if ($reason === '' || mb_strlen($reason) > 200) {
+            return $this->send($pid, ['error', 'Zugang nicht gesperrt: Bitte einen Grund angeben (bis 200 Zeichen).']);
+        }
+
+        return $this->lockResult($pid, $accessId, true, $reason);
+    }
+
+    public function sendUnlock(string $pid, string $accessId)
+    {
+        return $this->lockResult($pid, $accessId, false, '');
+    }
+
+    private function lockResult(string $pid, string $accessId, bool $locked, string $reason)
+    {
+        $p = $this->find(PublicId::id('projects', $pid));
+        $r = (new SendConfigs())->lockAccess((int) $p['id'], $accessId, $locked, $reason);
+        $what = 'Zugang ' . $accessId . ($locked ? ' gesperrt' : ' entsperrt');
+
+        return $this->send($pid, match (true) {
+            $r['pending']        => ['ok', $what . ': wartet auf Freigabe an der Node (mr:config:apply), danach verteilt der Admin die Sperre.'],
+            $r['error'] === null => ['ok', $what . ' (alle Nodes des Projekts).'],
+            default              => ['error', $what . ' fehlgeschlagen oder nicht überall angekommen: ' . $r['error']],
+        });
+    }
+
+    /** htmx: bring the domain test forward on one node of the project (node_key from the button). */
+    public function sendDomainTest(string $pid, string $domain)
+    {
+        $p      = $this->find(PublicId::id('projects', $pid));
+        $nodeId = (int) db_connect()->table('nodes')->select('id')->where('node_key', (string) $this->request->getPost('node'))->get()->getRow('id');
+        $err    = (new SendConfigs())->requestDomainTest((int) $p['id'], $domain, $nodeId);
+
+        return $this->send($pid, $err === null ? ['ok', 'Domain-Test für ' . $domain . ' angefordert; die Node startet ihn innerhalb einer Minute.'] : ['error', 'Domain-Test nicht angefordert: ' . $err]);
     }
 
     /** htmx partial: API tokens of the project (kept here, last use read live from the project's nodes). */

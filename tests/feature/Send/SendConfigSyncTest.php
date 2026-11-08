@@ -212,4 +212,109 @@ final class SendConfigSyncTest extends CIUnitTestCase
         $this->assertNull($pending->apply($pending->open()[0], 'operator'));
         $this->assertSame($exp['data']['hash'], $this->sync()->hash($this->pid));
     }
+
+    /** @return array{0: int, 1: array<string, mixed>|null} */
+    private function admin(string $method, string $uri, ?array $body = null): array
+    {
+        service('superglobals')->setServer('MR_CLIENT_VERIFY', 'SUCCESS')->setServer('MR_CLIENT_S_DN', 'CN=mailrunner-admin,O=MailRunner Admin');
+        $req = $this->withHeaders(['X-MailRunner-Actor' => 'admin@example.org']);
+        $res = $body !== null ? $req->withBodyFormat('json')->call($method, $uri, $body) : $req->call($method, $uri);
+
+        return [$res->response()->getStatusCode(), json_decode((string) $res->response()->getBody(), true)];
+    }
+
+    /** @return array<string, string> type => access_id */
+    private function accessIds(): array
+    {
+        return array_column($this->sync()->snapshot($this->pid)['accesses'], 'access_id', 'type');
+    }
+
+    public function testAdminLockStopsTheAccessTheCustomerCannotLiftItAndItTravelsWithTheSet(): void
+    {
+        $ids  = $this->accessIds();
+        $hash = $this->sync()->hash($this->pid);
+        $base = 'admin/v1/projects/acme/mailer/send-accesses/';
+
+        [$s, $err] = $this->admin('put', $base . $ids['api'] . '/lock', ['reason' => ' ']);
+        $this->assertSame([422, 'INVALID_ACCESS'], [$s, $err['error']['code']]);
+        [$s] = $this->admin('put', $base . 'mra_0000000000000000/lock', ['reason' => 'x']);
+        $this->assertSame(404, $s);
+
+        foreach (['api', 'smtp', 'ip'] as $t) {
+            [$s, $r] = $this->admin('put', $base . $ids[$t] . '/lock', ['reason' => 'Spam reports']);
+            $this->assertSame(200, $s);
+            $this->assertTrue($r['data']['locked']);
+        }
+        $this->assertSame($this->sync()->hash($this->pid), $r['data']['send_config_hash']);
+        $this->assertNotSame($hash, $r['data']['send_config_hash'], 'a lock changes the set: the admin distributes it');
+
+        // api: refused with the reason; the customer sees the lock and cannot lift it
+        $send = fn () => $this->withHeaders(['Authorization' => 'Bearer ' . $this->bearer])->withBodyFormat('json')
+            ->call('POST', 'v1/send', ['from' => 'info@shop.example', 'to' => ['a@example.net'], 'subject' => 'x', 'text' => 'x'])->response();
+        $res = $send();
+        $this->assertSame(403, $res->getStatusCode());
+        $this->assertSame('ACCESS_LOCKED', json_decode((string) $res->getBody(), true)['error']['code']);
+        [$s] = $this->api('PATCH', 'send-accesses/' . $ids['api'], ['enabled' => true]);
+        $this->assertSame(200, $s);
+        $this->assertSame(403, $send()->getStatusCode());
+        [, $list] = $this->api('GET', 'send-profiles/shop/accesses');
+        $mine = array_column($list['data'], null, 'access_id')[$ids['api']];
+        $this->assertSame([true, 'Spam reports'], [$mine['locked'], $mine['locked_reason']]);
+        [$s] = $this->api('PATCH', 'send-accesses/' . $ids['api'], ['locked' => false]);
+        $this->assertSame(422, $s);
+
+        // smtp and ip: out of the mail path configuration
+        $cfg = (new \App\Modules\Receive\Libraries\ConfigBuilder(db_connect()))->sendAccesses();
+        $this->assertSame([[], []], [$cfg['credentials'], $cfg['ip_accesses']]);
+        // a submission already accepted by the mail path is refused as well
+        $acc = service('sendSubmissionService')->access($ids['smtp']);
+        try {
+            service('sendSubmissionService')->submit($acc, 'info@shop.example', ['a@example.net'], "From: info@shop.example\r\n\r\nx", ['via' => 'smtp']);
+            $this->fail('expected ACCESS_LOCKED');
+        } catch (\App\Core\Send\SendRejected $e) {
+            $this->assertSame('ACCESS_LOCKED', $e->errorCode);
+        }
+
+        // the lock is part of the central set: a fresh node gets it, with the same hash
+        $set    = $this->sync()->snapshot($this->pid, true);
+        $locked = $this->sync()->hash($this->pid);
+        $this->wipe();
+        $this->assertSame($locked, $this->sync()->apply($this->pid, $set, null, new ChangeContext('admin', 'a'))['hash']);
+        $this->assertSame(403, $send()->getStatusCode());
+
+        // lifted: the set and its hash are as before the lock
+        foreach (['api', 'smtp', 'ip'] as $t) {
+            [$s, $r] = $this->admin('delete', $base . $ids[$t] . '/lock');
+            $this->assertSame(200, $s);
+            $this->assertFalse($r['data']['locked']);
+        }
+        $this->assertSame($hash, $this->sync()->hash($this->pid));
+        $this->assertSame(202, $send()->getStatusCode());
+        $this->assertSame(1, db_connect()->table('journal')->where('event', 'send.access.locked')->where('details LIKE', '%' . $ids['api'] . '%')->countAllResults());
+    }
+
+    public function testManualModeQueuesTheLockAndTheDomainTestRunsDirectly(): void
+    {
+        $ids = $this->accessIds();
+        config('Mailrunner')->adminConfig = 'manual';
+        [$s, $q] = $this->admin('put', 'admin/v1/projects/acme/mailer/send-accesses/' . $ids['api'] . '/lock', ['reason' => 'Abuse']);
+        $this->assertSame(202, $s);
+        $this->assertTrue($q['pending']);
+        $this->assertNull(db_connect()->table('send_accesses')->where('access_id', $ids['api'])->get()->getRow('locked_at'));
+        $pending = new \App\Core\Admin\PendingChanges();
+        $open    = $pending->open()[0];
+        $this->assertSame('acme/mailer/' . $ids['api'], $open['ref']);
+        $this->assertSame(['access ' . $ids['api'] => ['unlocked', 'locked: Abuse']], (new \App\Core\Admin\AdminChanges())->preview('send_access_lock', $open['ref'], $open['payload']));
+        $this->assertNull($pending->apply($open, 'operator'));
+        $this->assertSame('Abuse', db_connect()->table('send_accesses')->where('access_id', $ids['api'])->get()->getRow('locked_reason'));
+
+        // domain test: no configuration change, so also without approval
+        db_connect()->table('send_domains')->where('project_id', $this->pid)->update(['test_requested_at' => null]);
+        [$s, $r] = $this->admin('post', 'admin/v1/projects/acme/mailer/domains/shop.example/test');
+        $this->assertSame(202, $s);
+        $this->assertTrue($r['data']['test']['requested']);
+        $this->assertNotNull(db_connect()->table('send_domains')->where('project_id', $this->pid)->get()->getRow('test_requested_at'));
+        [$s, $err] = $this->admin('post', 'admin/v1/projects/acme/mailer/domains/other.example/test');
+        $this->assertSame([404, 'DOMAIN_NOT_FOUND'], [$s, $err['error']['code']]);
+    }
 }

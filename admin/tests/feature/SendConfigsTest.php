@@ -37,6 +37,26 @@ final class FakeSendNode
             return str_ends_with($path, '/send-config') ? ['data' => $this->set + ['hash' => $this->hash(), 'changed_at' => $this->changedAt]]
                 : ['data' => ['send_config' => ['hash' => $this->hash(), 'changed_at' => $this->changedAt]]];
         }
+        if (preg_match('~/send-accesses/(mra_\w+)/lock$~', $path, $m) === 1) { // admin lock, like SendAccessService::lock
+            if ($this->manual) {
+                return ['pending' => true];
+            }
+            foreach ($this->set['accesses'] as $i => $a) {
+                if ($a['access_id'] === $m[1]) {
+                    unset($this->set['accesses'][$i]['locked']);
+                    if ($method === 'PUT') {
+                        $this->set['accesses'][$i]['locked'] = ['at' => '2026-11-08T13:00:00.000000Z', 'reason' => $body['reason']];
+                    }
+                    $this->changedAt = '2026-11-08T13:00:00.000000Z';
+
+                    return ['data' => ['access_id' => $m[1], 'locked' => $method === 'PUT']];
+                }
+            }
+            throw new NodeError('ACCESS_NOT_FOUND', 'unknown', 404);
+        }
+        if (str_ends_with($path, '/test')) { // domain test: also in manual mode
+            return ['data' => ['test' => ['requested' => true]]];
+        }
         if ($this->manual) {
             return ['pending' => true];
         }
@@ -196,5 +216,81 @@ final class SendConfigsTest extends CIUnitTestCase
         $calls = count($this->nodes[1]->calls);
         $this->assertNull($this->configs()->reconcile(1));
         $this->assertCount($calls, $this->nodes[1]->calls, 'no call for system projects');
+    }
+
+    public function testLockOnTheProjectsNodeIsDistributedAndManualNodesWaitForApproval(): void
+    {
+        $this->startMove(); // node2 own node, node1 old node
+        $this->nodes[2]->set = $this->nodes[1]->set;
+        $this->configs()->reconcile(1);
+
+        $r = $this->configs()->lockAccess(1, 'mra_aaaaaaaaaaaaaaaa', true, 'Spam reports');
+        $this->assertSame(['error' => null, 'pending' => false], $r);
+        $this->assertSame('Spam reports', $this->nodes[1]->set['accesses'][0]['locked']['reason'], 'put on the other node at once');
+        $this->assertSame(2, (int) $this->db->table('send_configs')->select('source_node_id')->get()->getRow('source_node_id'));
+        $audit = $this->db->table('audit_log')->where('action', 'send.access_locked')->get()->getRowArray();
+        $this->assertSame('acme/mailer', $audit['object']);
+        $this->assertStringContainsString('Spam reports', $audit['details']);
+
+        $this->assertSame(['error' => null, 'pending' => false], $this->configs()->lockAccess(1, 'mra_aaaaaaaaaaaaaaaa', false, ''));
+        $this->assertArrayNotHasKey('locked', $this->nodes[1]->set['accesses'][0]);
+        $this->assertStringContainsString('ACCESS_NOT_FOUND', (string) $this->configs()->lockAccess(1, 'mra_bbbbbbbbbbbbbbbb', true, 'x')['error']);
+
+        // the own node in manual mode: waits; after approval the poll takes it over and distributes it
+        $this->nodes[2]->manual = true;
+        $this->assertSame(['error' => null, 'pending' => true], $this->configs()->lockAccess(1, 'mra_aaaaaaaaaaaaaaaa', true, 'Abuse'));
+        $this->assertArrayNotHasKey('locked', $this->nodes[1]->set['accesses'][0]);
+        $this->nodes[2]->set['accesses'][0]['locked'] = ['at' => '2026-11-08T14:00:00.000000Z', 'reason' => 'Abuse'];
+        $this->nodes[2]->changedAt = '2026-11-08T14:00:00.000000Z';
+        $this->configs()->reconcile(1);
+        $this->assertSame('Abuse', $this->nodes[1]->set['accesses'][0]['locked']['reason']);
+    }
+
+    public function testAnActionOnANodeTheAdminHasNotSeenIsTakenOverNotOverwritten(): void
+    {
+        $this->configs()->reconcile(1);
+        $this->startMove();
+        $this->nodes[2]->set = $this->nodes[1]->set; // came with the move, never reconciled by the admin
+        $this->db->table('send_config_nodes')->where('node_id', 2)->delete();
+        $this->configs()->lockAccess(1, 'mra_aaaaaaaaaaaaaaaa', true, 'Abuse');
+        $this->assertSame('Abuse', $this->nodes[2]->set['accesses'][0]['locked']['reason']);
+        $this->assertSame('Abuse', $this->nodes[1]->set['accesses'][0]['locked']['reason']);
+    }
+
+    public function testDomainTestOnlyOnTheProjectsNodes(): void
+    {
+        $this->assertNull($this->configs()->requestDomainTest(1, 'shop.example', 1));
+        $this->assertContains('POST projects/acme/mailer/domains/shop.example/test', $this->nodes[1]->calls);
+        $this->assertNotNull($this->configs()->requestDomainTest(1, 'shop.example', 2), 'node2 is not the project\'s node');
+        $this->assertSame([], $this->nodes[2]->calls);
+        $this->assertSame(1, $this->db->table('audit_log')->where('action', 'send.domain_test_requested')->countAllResults());
+        $this->nodes[1]->down = true;
+        $this->assertStringContainsString('node1.eu: connection refused', (string) $this->configs()->requestDomainTest(1, 'shop.example', 1));
+    }
+
+    public function testCardShowsLockAndActionButtonsOnlyForWriters(): void
+    {
+        helper('admin');
+        $data = ['domains' => [['domain' => 'shop.example', 'allowed' => true, 'dkim' => ['selector' => 's1', 'algorithm' => 'ed25519', 'bits' => 0], 'test' => ['state' => 'passed', 'requested' => false]]],
+            'send_profiles' => [['name' => 'shop', 'label' => '', 'enabled' => true, 'limit_hour' => 1, 'limit_day' => 1, 'retry' => ['attempts' => 1, 'max_minutes' => 60],
+                'test_interval_hours' => 24, 'senders' => ['shop.example'], 'recipients' => null, 'return_path_domain' => null, 'access_list' => [
+                    ['access_id' => 'mra_aaaaaaaaaaaaaaaa', 'type' => 'api', 'token_id' => 'mrt_x', 'label' => '', 'enabled' => true, 'locked' => true, 'locked_at' => '2026-11-08T13:00:00.000000Z', 'locked_reason' => 'Spam <b>reports</b>'],
+                    ['access_id' => 'mra_bbbbbbbbbbbbbbbb', 'type' => 'ip', 'networks' => ['192.0.2.8/29'], 'label' => '', 'enabled' => true, 'locked' => false, 'locked_at' => null, 'locked_reason' => null]]]]];
+        $render = fn () => view('projects/_send', ['project' => ['public_id' => 'pr0j-0002'], 'central' => ['central' => null, 'nodes' => []],
+            'nodes' => [['id' => 1, 'label' => 'Node', 'node_key' => 'node1.eu', 'data' => $data]], 'notice' => ['ok', 'Zugang gesperrt']]);
+
+        session()->set('access', 'rw');
+        $html = $render();
+        $this->assertStringContainsString('vom Betreiber gesperrt', $html);
+        $this->assertStringContainsString('Spam &lt;b&gt;reports&lt;/b&gt;', $html);
+        $this->assertStringContainsString('/projects/pr0j-0002/send/accesses/mra_aaaaaaaaaaaaaaaa/unlock', $html);
+        $this->assertStringContainsString('/projects/pr0j-0002/send/accesses/mra_bbbbbbbbbbbbbbbb/lock', $html);
+        $this->assertStringContainsString('/projects/pr0j-0002/send/domains/shop.example/test', $html);
+        $this->assertStringContainsString('Zugang gesperrt', $html);
+
+        session()->set('access', 'ro');
+        $html = $render();
+        $this->assertStringContainsString('vom Betreiber gesperrt', $html);
+        $this->assertStringNotContainsString('hx-post', $html);
     }
 }

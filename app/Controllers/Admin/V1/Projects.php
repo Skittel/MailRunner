@@ -22,6 +22,10 @@ use App\Core\Support\Time;
  *        and password hashes) for the central copy in MailRunner Admin; journal send.config.exported
  * PUT    /admin/v1/projects/{customer}/{project}/send-config   {"domains", "profiles", "accesses", "if_hash"?}: makes the
  *        node's set equal (409 SEND_CONFIG_CHANGED if it changed since if_hash); manual mode: queued (keys encrypted)
+ * PUT    /admin/v1/projects/{customer}/{project}/send-accesses/{access_id}/lock   {"reason": "..."}: admin lock, the
+ *        customer cannot lift it; DELETE lifts it. Manual mode: queued (kind send_access_lock)
+ * POST   /admin/v1/projects/{customer}/{project}/domains/{domain}/test   brings this node's domain test forward
+ *        (also in manual mode: changes no configuration)
  * DELETE /admin/v1/tokens/{token_id}
  */
 class Projects extends AdminController
@@ -157,6 +161,40 @@ class Projects extends AdminController
             $r = service('sendConfigSync')->apply((int) $p['id'], $body, $ifHash, $this->ctx());
 
             return ApiResponse::ok(['data' => $r]);
+        });
+    }
+
+    public function lockAccess(string $customer, string $project, string $accessId)
+    {
+        return $this->accessLock($customer . '/' . $project, $accessId, true, (string) ($this->body()['reason'] ?? ''));
+    }
+
+    public function unlockAccess(string $customer, string $project, string $accessId)
+    {
+        return $this->accessLock($customer . '/' . $project, $accessId, false, '');
+    }
+
+    private function accessLock(string $ref, string $accessId, bool $locked, string $reason)
+    {
+        return $this->guard(function () use ($ref, $accessId, $locked, $reason) {
+            $p = $this->sendProjectRow($ref);
+            service('sendAccessService')->get((int) $p['id'], $accessId); // 404 before queueing
+            if ($this->configManual()) {
+                return $this->queued('send_access_lock', $ref . '/' . $accessId, ['locked' => $locked, 'reason' => $reason]);
+            }
+            $a = (new AdminChanges())->accessLock($ref . '/' . $accessId, ['locked' => $locked, 'reason' => $reason], $this->ctx());
+
+            return ApiResponse::ok(['data' => \App\Core\Send\SendAccessService::present($a) + ['send_config_hash' => service('sendConfigSync')->hash((int) $p['id'])]]);
+        });
+    }
+
+    public function testDomain(string $customer, string $project, string $domain)
+    {
+        return $this->guard(function () use ($customer, $project, $domain) {
+            $p   = $this->sendProjectRow($customer . '/' . $project);
+            $row = service('sendDomainService')->requestTest((int) $p['id'], $domain, $this->ctx());
+
+            return ApiResponse::ok(['data' => \App\Core\Send\SendDomainService::present($row, $p)], 202);
         });
     }
 

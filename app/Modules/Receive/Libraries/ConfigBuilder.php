@@ -152,7 +152,7 @@ class ConfigBuilder
                     s.tls_required, s.allowed_networks, s.enabled AS cred_enabled, s.revoked_at AS cred_revoked
              FROM send_accesses a JOIN send_profiles pr ON pr.id = a.profile_id JOIN projects p ON p.id = a.project_id
              JOIN customers cu ON cu.id = p.customer_id LEFT JOIN smtp_credentials s ON s.id = a.smtp_credential_id
-             WHERE a.enabled = 1 AND pr.enabled = 1 AND p.enabled = 1 AND cu.enabled = 1 AND p.type = \'send\' AND a.type IN (\'smtp\', \'ip\')
+             WHERE a.enabled = 1 AND a.locked_at IS NULL AND pr.enabled = 1 AND p.enabled = 1 AND cu.enabled = 1 AND p.type = \'send\' AND a.type IN (\'smtp\', \'ip\')
              ORDER BY a.access_id',
         )->getResultArray();
         foreach ($rows as $r) {

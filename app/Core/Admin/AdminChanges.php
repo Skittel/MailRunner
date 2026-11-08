@@ -125,6 +125,32 @@ class AdminChanges
         return service('sendConfigSync')->apply((int) $p['id'], $set, null, $ctx);
     }
 
+    /**
+     * Admin lock of a send access; $ref = customer/project/access_id.
+     *
+     * @param array{locked?: bool, reason?: string} $payload
+     *
+     * @return array<string, mixed> the access
+     */
+    public function accessLock(string $ref, array $payload, ChangeContext $ctx): array
+    {
+        [$project, $accessId] = self::splitAccessRef($ref);
+        $p = service('projectService')->get($project);
+
+        return service('sendAccessService')->lock((int) $p['id'], $accessId, ! empty($payload['locked']), (string) ($payload['reason'] ?? ''), $ctx);
+    }
+
+    /** @return array{0: string, 1: string} project ref, access id */
+    private static function splitAccessRef(string $ref): array
+    {
+        $pos = strrpos($ref, '/');
+        if ($pos === false || substr_count($ref, '/') !== 2) {
+            throw new ConfigException('INVALID_ACCESS', 'Expected customer/project/access_id');
+        }
+
+        return [substr($ref, 0, $pos), substr($ref, $pos + 1)];
+    }
+
     /** @return array<string, mixed> */
     public static function decryptSendConfig(string $ref, array $payload): array
     {
@@ -159,6 +185,14 @@ class AdminChanges
             }
 
             return $diff;
+        }
+        if ($kind === 'send_access_lock') {
+            [$project, $accessId] = self::splitAccessRef($ref);
+            $p   = service('projectService')->find($project);
+            $row = $p === null ? null : db_connect()->table('send_accesses')->select('locked_at, locked_reason')->where('project_id', $p['id'])->where('access_id', $accessId)->get()->getRowArray();
+            $now = $row === null ? null : ($row['locked_at'] === null ? 'unlocked' : 'locked: ' . $row['locked_reason']);
+
+            return ['access ' . $accessId => [$now, ! empty($body['locked']) ? 'locked: ' . ($body['reason'] ?? '') : 'unlocked']];
         }
         if ($kind === 'token_revoke') {
             return ['revoke' => [$ref, 'revoked']];

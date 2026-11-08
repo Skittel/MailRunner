@@ -75,6 +75,9 @@ class SendConfigSync
         $accesses = [];
         foreach ($rows as $a) {
             $out = ['access_id' => $a['access_id'], 'profile' => $names[(int) $a['profile_id']] ?? '', 'type' => $a['type'], 'label' => $a['label'], 'enabled' => (bool) $a['enabled']];
+            if ($a['locked_at'] !== null) { // admin lock; absent when unlocked (sets without locks keep their hash)
+                $out['locked'] = ['at' => Time::toIso($a['locked_at']), 'reason' => (string) $a['locked_reason']];
+            }
             if ($a['type'] === 'api') {
                 $out['token']      = isset($tokens[(int) $a['api_token_id']]) ? $token($tokens[(int) $a['api_token_id']]) : null;
                 $out['token_prev'] = $a['api_token_prev_id'] !== null && isset($tokens[(int) $a['api_token_prev_id']]) ? $token($tokens[(int) $a['api_token_prev_id']]) : null;
@@ -236,6 +239,8 @@ class SendConfigSync
             $cur = null;
         }
         $row = ['profile_id' => (int) $profile['id'], 'type' => $a['type'], 'label' => mb_substr((string) ($a['label'] ?? ''), 0, 100), 'enabled' => ! empty($a['enabled']) ? 1 : 0,
+            'locked_at' => is_array($a['locked'] ?? null) ? (self::time($a['locked']['at'] ?? null) ?? Time::now()) : null,
+            'locked_reason' => is_array($a['locked'] ?? null) ? mb_substr((string) ($a['locked']['reason'] ?? ''), 0, 200) : null,
             'api_token_id' => null, 'api_token_prev_id' => null, 'smtp_credential_id' => null, 'networks' => null];
         switch ($a['type']) {
             case 'api':

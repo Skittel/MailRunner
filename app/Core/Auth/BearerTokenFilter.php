@@ -42,6 +42,9 @@ class BearerTokenFilter implements FilterInterface
             if ($access === null || ! (bool) $access['enabled'] || ! (bool) $access['profile_enabled']) {
                 return ApiResponse::error(403, 'ACCESS_DISABLED', 'The send access or its profile is disabled');
             }
+            if ($access['locked_at'] !== null) {
+                return ApiResponse::error(403, 'ACCESS_LOCKED', 'The operator locked this send access: ' . $access['locked_reason']);
+            }
             $token['send_access'] = $access;
         }
         CurrentToken::set($token);

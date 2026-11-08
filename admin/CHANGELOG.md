@@ -4,6 +4,16 @@ Admin and node are versioned separately since 0.1.26: `admin/VERSION` with tags 
 `VERSION` with tags `v*` (`CHANGELOG.md` in the repository root). An admin release only offers node updates when
 the node version in the same checkout is newer. Up to 0.1.25 both shared one version: see `../CHANGELOG.md`.
 
+## 0.1.32 - 2026-11-08
+- Send card, actions (users with write access): "Sperren" locks a send access with a reason (the customer sees the
+  reason and cannot lift the lock), "Entsperren" lifts it. The lock is set on the project's node and distributed at
+  once to the other nodes of the project; a node in manual mode first waits for approval, the next poll then
+  distributes it. An access lock set on a node the admin has not reconciled yet is taken over, never overwritten.
+- "Test anfordern" per domain and node brings the domain test forward on that node.
+- Audit `send.access_locked` (with reason), `send.access_unlocked`, `send.domain_test_requested`.
+- Accesses switched off by the customer show "aus", operator locks "vom Betreiber gesperrt". Needs node 0.2.9 for
+  the lock buttons (older nodes show none).
+
 ## 0.1.31 - 2026-11-08
 - Central send configuration (decision E-27): the customer's application changes domains, profiles and accesses on
   a node; the admin notices it by the configuration hash on every poll, takes the full set over and puts it on the

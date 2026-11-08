@@ -2,6 +2,21 @@
 
 Node versions (tags `v*`). Since 0.1.26 the admin has its own version and changelog: `admin/CHANGELOG.md`.
 
+## 0.2.9 - 2026-11-08
+Send role: admin actions (decision E-27).
+- Admin lock of a send access: `PUT /admin/v1/projects/{customer}/{project}/send-accesses/{access_id}/lock`
+  `{"reason": "..."}`, lifted with `DELETE`. A locked access does not work: API `403 ACCESS_LOCKED` with the reason,
+  SMTP login and ip access leave the mail path configuration, accepted submissions are refused. The customer sees
+  `locked`, `locked_at` and `locked_reason` and cannot lift it (`enabled` stays the customer's switch). Journal
+  `send.access.locked` / `send.access.unlocked`.
+- The lock is part of the central send configuration (`locked` on the access, only while locked: sets without
+  locks keep their hash), so the admin distributes it to every node of the project.
+- Manual config mode: the lock waits for `mr:config:apply` (kind `send_access_lock`, the preview shows old and new
+  state). Migration: `send_accesses.locked_at`, `locked_reason`; `admin_pending_changes.kind` gains
+  `send_access_lock`.
+- `POST /admin/v1/projects/{customer}/{project}/domains/{domain}/test` brings the node's domain test forward (also in
+  manual mode: it changes no configuration).
+
 ## 0.2.8 - 2026-11-08
 Send role: central distribution of the send configuration (decision E-27, operator decision 08.11.2026: the DKIM
 keys are kept encrypted in the admin).

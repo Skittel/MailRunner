@@ -45,8 +45,9 @@ class SendConfigs
 
     /**
      * Brings the project's nodes and the central copy together. Returns null or the errors (German, for the GUI).
+     * $from: the node an admin action just changed; its set is taken over even if this admin has not seen the node yet.
      */
-    public function reconcile(int $projectId): ?string
+    public function reconcile(int $projectId, ?int $from = null): ?string
     {
         $db = db_connect();
         $p  = $db->table('projects p')->select('p.id, p.type, p.node_id, p.move_from_node_id, p.project_key, c.customer_key')
@@ -89,6 +90,9 @@ class SendConfigs
         } else {
             $dirty = array_filter($state, static fn ($s, $nid) => $s['hash'] !== $central['hash'] && isset($known[$nid]['hash']) && $s['hash'] !== $known[$nid]['hash'],
                 ARRAY_FILTER_USE_BOTH);
+            if ($from !== null && isset($state[$from]) && $state[$from]['hash'] !== $central['hash']) {
+                $dirty[$from] = $state[$from];
+            }
             if ($dirty !== []) {
                 uasort($dirty, static fn ($a, $b) => strcmp((string) ($b['changed_at'] ?? ''), (string) ($a['changed_at'] ?? '')));
                 $from = array_key_first($dirty);
@@ -121,6 +125,72 @@ class SendConfigs
         $this->note($projectId, $errors);
 
         return $this->summary($errors, $nodes);
+    }
+
+    /**
+     * Admin lock of a send access (abuse etc.): set on the project's node, which then is taken over as the central set
+     * and put on the other nodes. The customer sees the lock and its reason but cannot lift it.
+     *
+     * @return array{error: string|null, pending: bool} pending: the node waits for approval (manual mode)
+     */
+    public function lockAccess(int $projectId, string $accessId, bool $locked, string $reason): array
+    {
+        [$ref, $nodes] = $this->project($projectId);
+        if ($ref === null) {
+            return ['error' => 'Kein Versandprojekt mit zentraler Konfiguration', 'pending' => false];
+        }
+        $node = $nodes[0];
+        try {
+            $res = ($this->client)($node)->ok($locked ? 'PUT' : 'DELETE', 'projects/' . $ref . '/send-accesses/' . rawurlencode($accessId) . '/lock', $locked ? ['reason' => $reason] : null);
+        } catch (Throwable $e) {
+            return ['error' => $node['node_key'] . ': ' . self::message($e), 'pending' => false];
+        }
+        $pending = ! empty($res['pending']);
+        Audit::log($locked ? 'send.access_locked' : 'send.access_unlocked', $ref, ['access_id' => $accessId, 'node' => $node['node_key'], 'pending' => $pending]
+            + ($locked ? ['reason' => $reason] : []));
+        if ($pending) { // after approval the node's set differs from the remembered one: the poll takes it over
+            return ['error' => null, 'pending' => true];
+        }
+
+        return ['error' => $this->reconcile($projectId, (int) $node['id']), 'pending' => false];
+    }
+
+    /**
+     * Brings the domain test forward on one node of the project (the test runs per node: its own IPs and keys).
+     * Returns null or the error.
+     */
+    public function requestDomainTest(int $projectId, string $domain, int $nodeId): ?string
+    {
+        [$ref, $nodes] = $this->project($projectId);
+        $node = array_values(array_filter($nodes, static fn ($n) => (int) $n['id'] === $nodeId))[0] ?? null;
+        if ($ref === null || $node === null) {
+            return 'Die Node gehört nicht zu diesem Versandprojekt';
+        }
+        try {
+            ($this->client)($node)->ok('POST', 'projects/' . $ref . '/domains/' . rawurlencode($domain) . '/test');
+        } catch (Throwable $e) {
+            return $node['node_key'] . ': ' . self::message($e);
+        }
+        Audit::log('send.domain_test_requested', $ref, ['domain' => $domain, 'node' => $node['node_key']]);
+
+        return null;
+    }
+
+    /** @return array{0: string|null, 1: list<array<string, mixed>>} ref of a central send project, its nodes (own node first) */
+    private function project(int $projectId): array
+    {
+        $db = db_connect();
+        $p  = $db->table('projects p')->select('p.type, p.node_id, p.move_from_node_id, p.project_key, c.customer_key')
+            ->join('customers c', 'c.id = p.customer_id')->where('p.id', $projectId)->get()->getRowArray();
+        if ($p === null || $p['type'] !== 'send' || $p['customer_key'] === Tokens::LOCAL_CUSTOMER) {
+            return [null, []];
+        }
+        $nodes = [];
+        foreach (array_filter([(int) $p['node_id'], (int) ($p['move_from_node_id'] ?? 0)]) as $nid) {
+            $nodes[] = $db->table('nodes')->where('id', $nid)->get()->getRowArray();
+        }
+
+        return [$p['customer_key'] . '/' . $p['project_key'], $nodes];
     }
 
     /**

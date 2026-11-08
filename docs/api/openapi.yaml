@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MailRunner customer API (receive, send)
-  version: 0.2.8
+  version: 0.2.9
   description: |
     Pull API of a MailRunner node. A client application collects the messages the node accepted
     for its project. A token belongs to exactly one project and only sees that project's data.
@@ -525,7 +525,7 @@ paths:
                         properties:
                           submission_id: { type: string, example: mrs_k3f9x2m7q1w8e4r6 }
                           messages: { type: array, items: { type: object, properties: { message_id: { type: string }, recipient: { type: string }, status: { type: string } } } }
-        '403': { description: 'SEND_ACCESS_REQUIRED, ACCESS_DISABLED, PROJECT_DISABLED', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'SEND_ACCESS_REQUIRED, ACCESS_DISABLED, ACCESS_LOCKED (locked by the operator; the message names the reason), PROJECT_DISABLED', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '413': { description: MESSAGE_TOO_LARGE, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { description: 'SENDER_NOT_ALLOWED, DKIM_MISSING, INVALID_FROM, INVALID_RECIPIENT, RECIPIENT_NOT_ALLOWED, INVALID_MESSAGE, INVALID_REQUEST', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { description: 'LIMIT_REACHED (profile or project)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -963,7 +963,10 @@ components:
         profile: { type: string }
         type: { type: string, enum: [api, smtp, ip] }
         label: { type: string }
-        enabled: { type: boolean }
+        enabled: { type: boolean, description: 'switched by the customer' }
+        locked: { type: boolean, description: 'locked by the operator (e.g. abuse): the access does not work until the operator lifts the lock; the customer cannot change it' }
+        locked_at: { type: string, format: date-time, nullable: true }
+        locked_reason: { type: string, nullable: true, description: 'reason given by the operator' }
         token_id: { type: string, description: api }
         expires_at: { type: string, format: date-time, nullable: true, description: api }
         previous_token_valid_until: { type: string, format: date-time, nullable: true, description: 'api, during a rotation' }
